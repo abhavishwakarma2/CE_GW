@@ -130,6 +130,11 @@ prescription     = int(s%x_ctrl(13))  !general prescription for the CE evolution
 ! Initial conditions for companion orbit
 ! NOTES:
 ! Presumably this test would not work if we began with a model number /= 1?
+
+  ! Abha comment: The inlist sets the initial model number to 1 when you start a new run
+  !               and for restarts the code picks up from the last saved photos file where 
+  !               the s%xtra() variables are remembered
+
 ! Hard-coded constants here should be given names or made into inlist
 ! parameters
 
@@ -306,6 +311,16 @@ real(dp)                              :: u
 
 !NOTES: significance of "100"? replace with a named constant
 !Should this be 100*Rsun?
+
+! Abha comment: Yes, this was something I wanted to discuss. The problem was that
+!               there are still radial surface oscillations in the primary star so
+!               at the beginning of the simulation, they affect the relative velocity
+!               of the neutron star with respect to the envelope quite drastically
+!               so I just told the code to not factor in the envelope velocity for
+!               until it plunges within some radius. I think the number 100 was there 
+!               because I was trying out different cases and didn't update this. But I 
+!               agree that it makes more sense to multiply it by Rsun.  
+
 if (r > 100) then
   v_rel = sqrt( (vxcomp - vxcore + (s%xtra(omega_env)*(ycomp - ycore)))**2 + &
                 (vycomp - vycore - (s%xtra(omega_env)*(xcomp - xcore)))**2 )
