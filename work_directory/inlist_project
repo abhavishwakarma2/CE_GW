@@ -1,0 +1,125 @@
+! For the sake of future readers of this file (yourself included),
+! ONLY include the controls you are actually using.  DO NOT include
+! all of the other controls that simply have their default values.
+
+&star_job
+
+  ! load 12 solar mass model
+    load_saved_model = .true.
+    load_model_filename = 'FOLDERS/input_models/core_removal_1.mod'
+
+  ! save a model at the end of the run
+    save_model_when_terminate = .false.
+    save_model_filename = 'output.mod'
+
+  ! display on-screen plots
+    pgstar_flag = .false.
+    
+  ! age
+    set_initial_age = .true.
+    initial_age = 0
+  
+  !initial model number
+    set_initial_model_number = .true.
+    initial_model_number = 0
+
+  ! pause
+    pause_before_terminate = .false.
+
+  ! optical depth
+    relax_tau_factor = .true.
+    relax_to_this_tau_factor = 1d0
+    
+  ! adding hydrodynamics
+  
+    !HLL solver 
+    ! change_v_flag = .true.
+    ! new_v_flag = .true.		
+    
+    !HLLC solver (better shock capturing)
+    change_u_flag = .true.
+    new_u_flag = .true.			!yes cell centered 
+
+/ ! end of star_job namelist
+
+
+&eos
+
+/ ! end of eos namelist
+
+
+&kap
+
+  Zbase = 0.01
+
+/ ! end of kap namelist
+
+
+&controls
+
+  ! when to stop
+    max_age = 2d1
+  
+  ! timestep
+    min_timestep_limit = 1d-60
+    !max_age_in_seconds = 1d8
+   
+  ! hydrodynamic boundary conditions
+    use_compression_outer_BC = .true.
+    use_momentum_outer_BC = .true.
+
+  ! energy controls
+    use_other_energy = .true.
+    use_other_wind = .false.
+  
+  ! extra controls
+    x_ctrl(1) = 1.33                !initial mass of NS (Msun)
+    x_ctrl(2) = 0.1                 !opacity (cm^2 g^-1)
+    x_ctrl(3) = 1                   !efficiency factor
+    x_ctrl(4) = 1                   !efactor to multiply to edot
+    x_ctrl(5) = 5d-2                !NS crust mass (Msun/yr)
+    x_ctrl(6) = 2.5d2               !intital NS spin frequency (Hz)
+    x_ctrl(7) = 1d6                 !initial NS equitorial radius (cm)
+    x_ctrl(8) = 1.77d-1             !initial NS ellipticity
+    x_ctrl(9) = 5d-1                !polytropic index
+    x_ctrl(10) = 1.4d-1             !beta secular
+    x_ctrl(11) = 2.8                !distance to source (kpc)
+    x_ctrl(12) = 0.2                !this times the initial orbital period = envelope rotation period
+    x_ctrl(13) = 1                  !which prescription: 1 - Holgado, 2 - Bronner
+
+  ! atmosphere
+
+  ! rotation
+
+  ! element diffusion
+
+  ! mlt
+
+  ! mixing
+
+  ! timesteps
+     max_timestep = 5d2 ! 1e-5 years
+     min_timestep_factor = 0.8d0
+     time_delta_coeff = 0.4d0 ! 50% of CFL-like condition
+
+  ! mesh
+     !Only in the case of HLLC solver 
+     use_split_merge_amr = .true.
+     split_merge_amr_log_zoning = .false.
+    !  trace_split_merge_amr = .true.
+     split_merge_amr_mesh_delta_coeff = 1.25d-2 !128x res     !8.4d-3 ~120 times better spatial resolution
+
+  ! solver
+     ! options for energy conservation (see MESA V, Section 3)
+     energy_eqn_option = 'dedt'
+     use_gold_tolerances = .true.
+
+  ! output
+     max_num_profile_models = 200000
+     max_tries_for_retry = 50
+     retry_limit = 200
+
+    !  log_directory = 'LOGS_files/600_try'
+    !  photo_directory = 'photos_files/600_try'
+
+/ ! end of controls namelist
