@@ -17,7 +17,7 @@
 !    - orbital angular velocity (omega)
 !    - quadrupole moment (Q)
 !    - maximum quadrupole moment (Qmax)
-!    - tidal bulge quadrupole moment (Qtb)
+!    - torque balance quadrupole moment (Qtb)
 !    - eccentricity (e)
 !    - x and y positions and velocities of both the primary core and the
 !      neutron star (xcore, ycore, vxcore, vycore, xcomp, ycomp, vxcomp, vycomp)
@@ -218,7 +218,25 @@ subroutine advance_energy_prescription(s, t, dt)
 type (star_info), pointer, intent(inout) :: s
 real(dp), intent(in)                     :: t, dt
 
-!TODO
+real(dp) :: x(5), dxdt(5), e_inj, r, v_rel
+
+x = (/ s%xtra(ia), s%xtra(iomega), s%xtra(iM_ns), s%xtra(iM_acc) , 0. /)
+
+call energy_prescrip_rhs(t, x, dxdt, s)
+
+x = x + dt*dxdt
+
+s%xtra(ia)     = x(1)
+s%xtra(iomega) = x(2)
+s%xtra(iM_ns)  = x(3)
+s%xtra(iM_acc) = x(4)
+e_inj          = x(5)
+
+call interpolate(a_orb, menc, s%R, s%m)
+v_rel = SQRT(standard_cgrav*(s%xtra(iM_ns) + menc)/s%xtra(ia)) - &
+         s%xtra(iomega_env)*s%xtra(ia)
+
+call add_energy_to_mesa(s, s%xtra(ia), s%xtra(iM_ns), v_rel, e_inj)
 
 return
 end subroutine advance_energy_prescription
@@ -233,7 +251,7 @@ subroutine advance_force_prescription(s, t, dt)
 type (star_info), pointer, intent(inout) :: s
 real(dp), intent(in)                     :: t, dt
 
-real(dp) :: x(12), dxdt(12), e_inj, r
+real(dp) :: x(12), dxdt(12), e_inj, r, v_rel !A: added v_rel
 
 ! Set up solution vector.
 
@@ -291,7 +309,42 @@ real(dp), intent(in)                     :: t, x(:)
 real(dp), intent(out)                    :: dxdt(:)
 type (star_info), pointer, intent(inout) :: s
 
-!TODO
+!A: orbital separation is given the variable a_orb. Should I
+!   choose r instead?
+
+real(dp) :: a_orb, omega, mns, macc, v_rel, rho, menc, mdot, fd, edot, &
+            e_inj, omegadot, e, beta, Q, da_dEorb
+
+a_orb    = x(1)
+omega    = x(2)
+mns      = x(3)
+macc     = x(4)
+e_inj    = x(5)
+
+! Relative velocity
+v_rel = SQRT(standard_cgrav*(mns + menc)/a_orb) - s%xtra(iomega_env)*a_orb
+
+!TODO: evaluate da_dEorb properly
+
+! Interpolate needed quantitites from MESA model
+call interpolate(a_orb, rho, s%R, s%rho)
+call interpolate(a_orb, menc, s%R, s%m)
+
+! Get accretion rate using MR15
+! Ignore fd and edot from this model
+call mr15(s, a_orb, mns, rho, v_rel, mdot, fd, edot)
+
+! Get drag and power using Kim & Kim (2010)
+call kim2010(s, a_orb, mns, rho, v_rel, fd, edot)
+
+! Get spinup rate
+call get_spinup_rate(s, mns, macc, omega, omegadot, e, beta, Q)
+
+dxdt(1) = edot * da_dEorb
+dxdt(2) = omegadot
+dxdt(3) = mdot
+dxdt(4) = mdot
+dxdt(5) = edot
 
 return
 end subroutine energy_prescrip_rhs
@@ -310,8 +363,8 @@ real(dp), intent(out)                 :: vx_rel, vy_rel, v_rel
 
 real(dp)                              :: u
 
-vx_rel = (vxcomp - vxcore + s%xtra(iomega_env)*(ycomp - ycore))**2
-vy_rel = (vycomp - vycore - s%xtra(iomega_env)*(xcomp - xcore))**2
+vx_rel = vxcomp - vxcore + s%xtra(iomega_env)*(ycomp - ycore) !A: removed squares
+vy_rel = vycomp - vycore - s%xtra(iomega_env)*(xcomp - xcore)
 
 !NOTES: replace 100*Rsun with a named constant
 if (r <= 100*Rsun) then
@@ -445,7 +498,7 @@ subroutine kim2007(s, r, M, rho, v_rel, fd_out, edot_out)
 
 type (star_info), pointer, intent(in) :: s
 real(dp), intent(in)                  :: r, M, rho, v_rel
-real(dp, intent(out)                  :: fd_out, edot_out
+real(dp), intent(out)                  :: fd_out, edot_out
 
 real(dp) :: cs, mach
 
