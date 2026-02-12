@@ -160,9 +160,6 @@ if (s%model_number == 1) then
     s%xtra(ivycomp) = SQRT(standard_cgrav*(s%xtra(iM_ns) + menc)/s%xtra(ia))
   end if
 
-  ! NOTES: what's this?
-  s%x_ctrl(15) = 2
-
 end if
 
 ! Initialize time integration
