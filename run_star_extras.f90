@@ -190,10 +190,6 @@ subroutine evolve_companion_and_inject_energy(id, ierr)
 
    enddo
 
-   !TODO
-   ! Update s%xtra() quantities and other things to be recorded
-   call update_quantities
-
    ! Print diagnostic info
 
    call print_info
@@ -302,11 +298,8 @@ subroutine energy_prescrip_rhs(t, x, dxdt, s)
    real(dp), intent(out)                    :: dxdt(:)
    type (star_info), pointer, intent(inout) :: s
 
-   !A: orbital separation is given the variable a_orb. Should I
-   !   choose r instead?
-
    real(dp) :: a_orb, omega, mns, macc, v_rel, rho, menc, mdot, fd, edot, &
-               e_inj, omegadot, e, beta, Q, da_dEorb
+               e_inj, omegadot, e, beta, Q, da_dEorb, strain
 
    a_orb    = x(1)
    omega    = x(2)
@@ -344,36 +337,11 @@ subroutine energy_prescrip_rhs(t, x, dxdt, s)
    dxdt(4) = mdot
    dxdt(5) = edot
 
+   ! Get strain
+   call get_strain(s, Q, omega, D, strain)
+
    return
 end subroutine energy_prescrip_rhs
-
-! ------------------------------------------------------------------------------
-
-! Compute the relative velocity of the NS and the donor envelope.
-
-subroutine get_relative_velocity(s, r, xcore, ycore, xcomp, ycomp, &
-                                 vxcore, vycore, vxcomp, vycomp, &
-                                 vx_rel, vy_rel, v_rel)
-
-   type (star_info), pointer, intent(in) :: s
-   real(dp), intent(in)                  :: r
-   real(dp), intent(out)                 :: vx_rel, vy_rel, v_rel
-
-   real(dp)                              :: u
-
-   vx_rel = vxcomp - vxcore + s%xtra(iomega_env)*(ycomp - ycore) !A: removed squares
-   vy_rel = vycomp - vycore - s%xtra(iomega_env)*(xcomp - xcore)
-
-   if (r <= v_rel_const*Rsun) then
-      call interpolate(r, u, s%R, s%u)
-      vx_rel = vx_rel - u*(xcomp - xcore)/r
-      vy_rel = vy_rel - u*(ycomp - ycore)/r
-   end if
-
-   v_rel = sqrt( vx_rel**2 + vy_rel**2 )
-
-   return
-end subroutine get_relative_velocity
 
 ! ------------------------------------------------------------------------------
 
@@ -436,8 +404,40 @@ subroutine force_prescrip_rhs(t, x, dxdt, s)
    dxdt(11) = mdot
    dxdt(12) = edot
 
+   ! Get strain
+   s%xtra(istrain) = 2 * standard_cgrav * Q * omega**2 / (D * c_light**4)
+
    return
 end subroutine force_prescrip_rhs
+
+! ------------------------------------------------------------------------------
+
+! Compute the relative velocity of the NS and the donor envelope.
+
+subroutine get_relative_velocity(s, r, xcore, ycore, xcomp, ycomp, &
+                                 vxcore, vycore, vxcomp, vycomp, &
+                                 vx_rel, vy_rel, v_rel)
+
+   type (star_info), pointer, intent(in) :: s
+   real(dp), intent(in)                  :: r
+   real(dp), intent(out)                 :: vx_rel, vy_rel, v_rel
+
+   real(dp)                              :: u
+
+   vx_rel = vxcomp - vxcore + s%xtra(iomega_env)*(ycomp - ycore) !A: removed squares
+   vy_rel = vycomp - vycore - s%xtra(iomega_env)*(xcomp - xcore)
+
+   if (r <= v_rel_const*Rsun) then
+      call interpolate(r, u, s%R, s%u)
+      vx_rel = vx_rel - u*(xcomp - xcore)/r
+      vy_rel = vy_rel - u*(ycomp - ycore)/r
+   end if
+
+   v_rel = sqrt( vx_rel**2 + vy_rel**2 )
+
+   return
+end subroutine get_relative_velocity
+
 
 ! ------------------------------------------------------------------------------
 
@@ -708,8 +708,8 @@ subroutine get_spinup_rate(s, M, Macc, omega, omegadot, e, beta, Q)
    ! max(Qmax, Qtb) instead of min(Qmax, Qtb), if the text following the equation is 
    ! correct.
    if (Qtb > Qmax) then
-      Rz       = Req*(1 - e)                     ! from defn of ellipticity
-      Imom     = (M/5.) * (Rz**2 + Req**2)       ! Holgado et al. after eqn 16
+      !Rz       = Req*(1 - e)                     ! from defn of ellipticity
+      Imom     = (2.*M/5.) * R0**2       ! Holgado et al. after eqn 16  !(M/5.) * (Rz**2 + Req**2)
       Q        = Qmax                            ! Holgado et al. eqn 41
                                                    ! NOTES: inconsistency with eqn 16?
       Nacc     = Mdot*sqrt(standard_cgrav*M*Req) ! Holgado et al. eqn 4
@@ -728,12 +728,6 @@ end subroutine get_spinup_rate
 
 ! Update all the s%xtra() quantities used to track the model, as well as any
 ! quantities that will be stored to history files
-
-!TODO
-subroutine update_quantities()
-
-return
-end subroutine update_quantities
 
 ! ------------------------------------------------------------------------------
 
@@ -779,49 +773,16 @@ end subroutine print_info
 
 !TODO
 !DONE: to evaluate the gravitational wave strain
-subroutine evaluate_strain(id, ierr)
-   !star variables
-   integer, intent(in) :: id
-   integer, intent(out) :: ierr
-   type (star_info), pointer :: s
+subroutine evaluate_strain(s, Q, omega, D, strain)
+   type (star_info), pointer, intent(in) :: s
+   real(dp), intent(in)                  :: Q, omega, D
+   real(dp), intent(out)                 :: strain
 
-   !subroutine variables
-   real(dp) :: omega_func_curr
-
-   !calling star pointer
-   ierr = 0
-   call star_ptr(id, s, ierr)
-   if (ierr /= 0) return
-
-   if (s%model_number == 1) then
-      call Req_and_beta(s%xtra(ie), Req, Rbar, beta)
-      omega_next = s%xtra(iomega)                             !Hz
-      s%xtra(iQtb) = sqrt((5*(clight**5)*mdot*sqrt(standard_cgrav*s%xtra(iM_ns)*Req))/(32*standard_cgrav*((s%xtra(iomega))**5))) !g cm^2
-      Qtb_next = s%xtra(iQtb)                                 !g cm^2
-      Qmax_next = s%xtra(iQmax)                               !g cm^2
-      s%xtra(Q_curr) = s%xtra(iQtb)                           !g cm^2
-      Q_next = s%xtra(iQ)                                     !g cm^2
-      e_next = s%xtra(ie)                                     !dimensionless
-      aa_next = s%xtra(iaa)                                   !cm
-      bb_next = s%xtra(ibb)                                   !cm
-      mom_inert_next = s%xtra(imom_inert)                     !gm cm^2
-
-      decay_coeff = 1                                             !dimensionless
-
-      s%xtra(istrain) = 2*standard_cgrav*((s%xtra(iomega))**2)*(s%xtra(iQ))/(D*(clight**4)) !dimensionless
-      strain_next = s%xtra(istrain)                            !dimensionless
-
-   else 
-      if (s%xtra(ie) > 0.817) then 
-         s%xtra(ie) = 0.817                               !dimensionless
-      end if
-
-      call Req_and_beta(s%xtra(ie), Req, Rbar, beta)
-      omega_func_curr = (mdot*sqrt(standard_cgrav*s%xtra(iM_ns)*Req) - (32*standard_cgrav*(s%xtra(iomega)**5)*(s%xtra(iQ_)**2))/(5*clight**5))/s%xtra(imom_inert)
-      call omega_and_q(id, ierr, M_ns_next, omega_func_curr)
-      strain_next = 2*standard_cgrav*(omega_next**2)*Q_next/(D*(clight**4))  !dimensionless
-
-   end if
+   !evaluate the strain using the current value of omega and Q
+   strain = 2 * standard_cgrav * Q * omega**2 / (D * c_light**4)
+   
+   !update the s%xtra(istrain) quantity
+   s%xtra(istrain) = strain
 
 end subroutine evaluate_strain
 
