@@ -1209,7 +1209,11 @@ integer function how_many_extra_profile_header_items(id)
    ierr = 0
    call star_ptr(id, s, ierr)
    if (ierr /= 0) return
-   how_many_extra_profile_header_items = 4
+   if (prescription == FORCE_PRESCRIPTION) then
+      how_many_extra_profile_header_items = 39
+   else if (prescription == ENERGY_PRESCRIPTION) then
+      how_many_extra_profile_header_items = 29
+   end if
 end function how_many_extra_profile_header_items
 
 ! ------------------------------------------------------------------------------
