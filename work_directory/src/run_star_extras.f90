@@ -17,7 +17,7 @@
 !    - orbital angular velocity (omega)
 !    - quadrupole moment (Q)
 !    - maximum quadrupole moment (Qmax)
-!    - tidal bulge quadrupole moment (Qtb)
+!    - torque balance quadrupole moment (Qtb)
 !    - eccentricity (e)
 !    - x and y positions and velocities of both the primary core and the
 !      neutron star (xcore, ycore, vxcore, vycore, xcomp, ycomp, vxcomp, vycomp)
@@ -61,31 +61,33 @@ integer, parameter :: MR15_DRAG = 1, KIM07_DRAG = 2, KIM10_DRAG = 3
 integer, parameter :: Nsteps = 10
 
 ! xtra variables - values describing NS and its orbit
-integer, parameter :: a         = 1,  M_ns      = 2,  &
-                      M_acc     = 3,  omega_env = 4,  &
-                      omega     = 5,  Q         = 6,  &
-                      Qmax      = 7,  Qtb       = 8,  &
-                      e         = 9,  aa        = 10, &
-                      bb        = 11, mom_inert = 12, &
-                      strain    = 13, xcore     = 14, &
-                      ycore     = 15, xcomp     = 16, &
-                      ycomp     = 17, vxcore    = 18, &
-                      vycore    = 19, vxcomp    = 20, &
-                      vycomp    = 21
+integer, parameter :: ia         = 1,  iM_ns      = 2,  &
+                      iM_acc     = 3,  iomega_env = 4,  &
+                      iomega     = 5,  iQ         = 6,  &
+                      iQmax      = 7,  iQtb       = 8,  &
+                      imom_inert = 9,  istrain    = 10, &
+                      ixcore     = 11, iycore     = 12, &
+                      ixcomp     = 13, iycomp     = 14, &
+                      ivxcore    = 15, ivycore    = 16, &
+                      ivxcomp    = 17, ivycomp    = 18  
 
 ! input parameters from inlists
 real(dp) :: M_ns_initial, omega_initial, e_initial, D, R0, r1, r2, &
-            op_const, eta, efactor, M_crust, n_poly, beta_sec, menc, &
+            op_const, eta, efactor, M_crust, n_poly, beta_sec, menc_global, &
             omega_env_factor
 
-integer  :: prescription  
+!constant parameters
+real(dp), parameter ::  ia_init_rsun = 261, Qmax_const = 4*1d39, &
+                        v_rel_const = 0, aorb_init_ratio = 9.0d-1
+
+integer  :: prescription, drag_prescription
 
 ! other variables
-real(dp) :: temp, fd, decay_coeff, Req, Rbar, beta, ebind, eorb_change, &
-            mdot, v_rel, Ra_br, mdot_br, fd_br, edot_br, mdot_hl_br, &
-            mdot_mr15_ratio_br, mdot_mr15_br, fd_mr15_ratio_br, &
-            fd_mr15_br, fd_hl_br, v, edot, csound
-integer :: azone
+!real(dp) :: temp, fd, decay_coeff, Req, Rbar, beta, ebind, eorb_change, &
+!            mdot, v_rel, Ra_br, mdot_br, fd_br, edot_br, mdot_hl_br, &
+!            mdot_mr15_ratio_br, mdot_mr15_br, fd_mr15_ratio_br, &
+!            fd_mr15_br, fd_hl_br, v, edot, csound, vx_rel, vy_rel
+!integer :: azone
 
 contains
 
@@ -96,121 +98,97 @@ contains
 
 subroutine evolve_companion_and_inject_energy(id, ierr)
 
-integer, intent(in)       :: id
-integer, intent(out)      :: ierr
+   integer, intent(in)       :: id
+   integer, intent(out)      :: ierr
 
-type (star_info), pointer :: s
-integer                   :: i
-real(dp)                  :: tlocal, dtlocal
+   type (star_info), pointer :: s
+   integer                   :: i
+   real(dp)                  :: tlocal, dtlocal
 
-! Get pointer to the MESA model
+   ! Get pointer to the MESA model
 
-ierr = 0
-call star_ptr(id, s, ierr)
-if (ierr /= 0) return
+   ierr = 0
+   call star_ptr(id, s, ierr)
+   if (ierr /= 0) return
 
-! Initialising - These values will be taken from the inlist_project file
-   
-s%x_ctrl(14)     = s%model_number
-M_ns_initial     = s%x_ctrl(1)*Msun   !mass of the NS (gm)
-op_const         = s%x_ctrl(2)        !opacity constant (cm^2/g)
-eta              = s%x_ctrl(3)        !efficiency factor
-efactor          = s%x_ctrl(4)        !multiplication factor for injected energy
-M_crust          = s%x_ctrl(5)*Msun   !mass of the crust (gm)
-omega_initial    = 2*pi*s%x_ctrl(6)   !initial spin frequency (Hz)
-R0               = s%x_ctrl(7)        !equatorial radius (cm)
-e_initial        = s%x_ctrl(8)        !initial ellipticity
-n_poly           = s%x_ctrl(9)        !polytropic index
-beta_sec         = s%x_ctrl(10)       !beta secular
-D                = s%x_ctrl(11)*1d3*pc!distance to the source (cm)
-omega_env_factor = s%x_ctrl(12)       !omega_env_factor*initial_orbital_period =
-                                      !envelope omega
-prescription     = int(s%x_ctrl(13))  !general prescription for the CE evolution
+   ! Initialising - These values will be taken from the inlist_project file
+      
+   s%x_ctrl(14)     = s%model_number
+   M_ns_initial     = s%x_ctrl(1)*Msun   !mass of the NS (gm)
+   op_const         = s%x_ctrl(2)        !opacity constant (cm^2/g)
+   eta              = s%x_ctrl(3)        !efficiency factor
+   efactor          = s%x_ctrl(4)        !multiplication factor for injected energy
+   M_crust          = s%x_ctrl(5)*Msun   !mass of the crust (gm)
+   omega_initial    = 2*pi*s%x_ctrl(6)   !initial spin frequency (Hz)
+   R0               = s%x_ctrl(7)        !equatorial radius (cm)
+   e_initial        = s%x_ctrl(8)        !initial ellipticity
+   n_poly           = s%x_ctrl(9)        !polytropic index
+   beta_sec         = s%x_ctrl(10)       !beta secular
+   D                = s%x_ctrl(11)*1d3*pc!distance to the source (cm)
+   omega_env_factor = s%x_ctrl(12)       !omega_env_factor*initial_orbital_period =
+                                         !envelope omega
+   prescription     = int(s%x_ctrl(13))  !general prescription for the CE evolution
+   drag_prescription = int(s%x_ctrl(15)) !drag prescription to use for force prescription
 
-! Initial conditions for companion orbit
-! NOTES:
-! Presumably this test would not work if we began with a model number /= 1?
+   ! Initial conditions for companion orbit
 
-  ! Abha comment: The inlist sets the initial model number to 1 when you start a new run
-  !               and for restarts the code picks up from the last saved photos file where 
-  !               the s%xtra() variables are remembered
+   if (s%model_number == 1) then
 
-! Hard-coded constants here should be given names or made into inlist
-! parameters
+      s%xtra(ia)         = ia_init_rsun*Rsun                            !semimajor axis (cm)
+      s%xtra(iM_ns)      = M_ns_initial                                 !NS mass (g)
+      s%xtra(iM_acc)     = 0.                                           !gm ! accreted mass?
+      s%xtra(iomega)     = omega_initial                                !NS spin freq (Hz)
+      !s%xtra(ie)         = e_initial                                   !NS ellipticity
+      s%xtra(iQmax)      = Qmax_const*(s%xtra(iM_acc)/M_crust)          !NS quadrupole moment
+                                                                        !(g cm^2)
+      !s%xtra(iaa)        = R0*(1+s%xtra(ie)/2)                         !NS major axis (cm)
+      !s%xtra(ibb)        = R0*(1-s%xtra(ie)/2)                         !NS minor axis (cm)
+      s%xtra(imom_inert) = s%xtra(iM_ns)*(2*R0**2)/5
+                                                                        !NS moment of inertia
+                                                                        !(g cm^2)
+      
+      call interpolate(s%xtra(ia), menc_global, s%R, s%m)
+      s%xtra(iomega_env) = omega_env_factor * &
+                           SQRT(standard_cgrav*(s%xtra(iM_ns) + menc_global)/ s%xtra(ia)**3) !along z axis, envelope angular velocity (Hz)
 
-if (s%model_number == 1) then
+      if (prescription == FORCE_PRESCRIPTION) then
+         s%xtra(ixcore)  = 0.
+         s%xtra(iycore)  = 0.
+         s%xtra(ixcomp)  = s%xtra(ia)
+         s%xtra(iycomp)  = 0.
+         s%xtra(ivxcore) = 0.
+         s%xtra(ivycore) = 0.
+         s%xtra(ivxcomp) = 0.
+         s%xtra(ivycomp) = SQRT(standard_cgrav*(s%xtra(iM_ns) + menc_global)/s%xtra(ia))
+      end if
 
-  s%xtra(a)         = 290*Rsun !9.8d-1*s%R(1)          !semimajor axis (cm)
-  s%xtra(M_ns)      = M_ns_initial                     !NS mass (g)
-  s%xtra(M_acc)     = 0                                !gm ! accreted mass?
-  s%xtra(omega)     = omega_initial                    !NS spin freq (Hz)
-  s%xtra(e)         = e_initial                        !NS ellipticity
-  s%xtra(Qmax)      = 4*1d39*(s%xtra(M_acc)/M_crust)   !NS quadrupole moment
-                                                       !(g cm^2)
-  s%xtra(aa)        = R0*(1+s%xtra(e)/2)               !NS major axis (cm)
-  s%xtra(bb)        = R0*(1-s%xtra(e)/2)               !NS minor axis (cm)
-  s%xtra(mom_inert) = s%xtra(M_ns)*(s%xtra(aa)**2 + s%xtra(bb)**2)/5
-                                                       !NS moment of inertia
-                                                       !(g cm^2)
- 
-  call interpolate(s%xtra(a), menc, s%R, s%m)
-  s%xtra(omega_env) = omega_env_factor * &
-                      SQRT(standard_cgrav*(s%xtra(M_ns) + menc)/ s%xtra(a)**3)
+   end if
 
-  if (prescription == FORCE_PRESCRIPTION) then
-    s%xtra(xcore)  = 0
-    s%xtra(ycore)  = 0
-    s%xtra(xcomp)  = s%xtra(a)
-    s%xtra(ycomp)  = 0
-    s%xtra(vxcore) = 0
-    s%xtra(vycore) = 0
-    s%xtra(vxcomp) = 0
-    s%xtra(vycomp) = SQRT(standard_cgrav*(s%xtra(M_ns) + menc)/s%xtra(a))
-  end if
+   ! Initialize time integration
 
-  ! NOTES: what's this?
-  s%x_ctrl(15) = 2
+   tlocal  = s%time 
+   dtlocal = s%dt_next / Nsteps
+   s%extra_heat(:)%val = 0.
 
-end if
+   ! Integrate
 
-! Initialize time integration
+   do i = 1, Nsteps
+      select case (prescription)
+         case (ENERGY_PRESCRIPTION)
+            call advance_energy_prescription(s, tlocal, dtlocal)
+         case (FORCE_PRESCRIPTION)
+            call advance_force_prescription(s, tlocal, dtlocal)
+      end select
 
-tlocal  = s%time 
-dtlocal = s%dt_next / Nsteps
-s%extra_heat(:) = 0.
+      tlocal = tlocal + dtlocal
+   enddo
 
-! Integrate
+   ! Print diagnostic info
 
-do i = 1, Nsteps
+   call print_info(s)
 
-  select case (prescription)
-    case (ENERGY_PRESCRIPTION)
-      stop "Energy prescription not yet supported"
-      !call advance_energy_prescription(s, tlocal, dtlocal)
-    case (FORCE_PRESCRIPTION)
-      call advance_force_prescription(s, tlocal, dtlocal)
-  end select
-
-  tlocal = tlocal + dtlocal
-
-enddo
-
-! Print diagnostic info
-
-call print_info
-
-return
+   return
 end subroutine evolve_companion_and_inject_energy
-
-!NOTES: Not sure what the significance of these controls is
-!   !updating the total accreted mass and NS mass
-!   if (s%x_ctrl(14) /= s%x_ctrl(15)) then
-!      call forward_euler(s%xtra(M_acc_curr), mdot, s%dt_next, M_acc_next)     !gm
-!      call forward_euler(s%xtra(M_ns_curr), mdot, s%dt_next, M_ns_next)       !gm
-!   else 
-!      call forward_euler(s%xtra(M_acc_curr), mdot, 0d0, M_acc_next)     !gm
-!      call forward_euler(s%xtra(M_ns_curr), mdot, 0d0, M_ns_next)       !gm
-!   end if
 
 ! ------------------------------------------------------------------------------
 
@@ -219,12 +197,30 @@ end subroutine evolve_companion_and_inject_energy
 
 subroutine advance_energy_prescription(s, t, dt)
 
-type (star_info), pointer, intent(inout) :: s
-real(dp), intent(in)                     :: t, dt
+   type (star_info), pointer, intent(inout) :: s
+   real(dp), intent(in)                     :: t, dt
 
-!TODO
+   real(dp) :: x(5), dxdt(5), e_inj, a_orb, v_rel, menc
 
-return
+   x = (/ s%xtra(ia), s%xtra(iomega), s%xtra(iM_ns), s%xtra(iM_acc) , 0d0 /)
+
+   call energy_prescrip_rhs(s, t, x, dxdt)
+
+   x = x + dt*dxdt
+
+   s%xtra(ia)     = x(1)
+   s%xtra(iomega) = x(2)
+   s%xtra(iM_ns)  = x(3)
+   s%xtra(iM_acc) = x(4)
+   e_inj          = x(5)
+
+   a_orb = s%xtra(ia)
+
+   call interpolate(a_orb, menc, s%R, s%m)
+   call get_relative_velocity_energy_rhs(s, a_orb, s%xtra(iM_ns), menc, v_rel)
+   call add_energy_to_mesa(s, s%xtra(ia), s%xtra(iM_ns), v_rel, e_inj)
+
+   return
 end subroutine advance_energy_prescription
 
 ! ------------------------------------------------------------------------------
@@ -234,50 +230,57 @@ end subroutine advance_energy_prescription
 
 subroutine advance_force_prescription(s, t, dt)
 
-type (star_info), pointer, intent(inout) :: s
-real(dp), intent(in)                     :: t, dt
+   type (star_info), pointer, intent(inout) :: s
+   real(dp), intent(in)                     :: t, dt
 
-real(dp) :: x(12), dxdt(12), e_inj, r
+   real(dp) :: x(12), dxdt(12), e_inj, r, v_rel
+   real(dp) :: vx_rel, vy_rel 
 
-! Set up solution vector.
+   ! Set up solution vector.
 
-x = (/ s%xtra(xcore), s%xtra(ycore), s%xtra(xcomp), s%xtra(ycomp), &
-       s%xtra(vxcore), s%xtra(vycore), s%xtra(vxcomp), s%xtra(vycomp), &
-       s%xtra(omega),  s%xtra(M_ns),   s%xtra(M_acc), 0. /)
+   x = (/ s%xtra(ixcore),  s%xtra(iycore),  s%xtra(ixcomp),  s%xtra(iycomp), &
+         s%xtra(ivxcore), s%xtra(ivycore), s%xtra(ivxcomp), s%xtra(ivycomp), &
+         s%xtra(iomega),  s%xtra(iM_ns),   s%xtra(iM_acc),  0d0 /)
 
-! Forward Euler step. We can do other integration schemes if we do time
-! extrapolation of the MESA model in force_prescrip_rhs.
+   ! Forward Euler step. We can do other integration schemes if we do time
+   ! extrapolation of the MESA model in force_prescrip_rhs.
 
-call force_prescrip_rhs(t, x, dxdt, s)
+   call force_prescrip_rhs(t, x, dxdt, s)
 
-x = x + dt*dxdt
+   x = x + dt*dxdt
 
-! Unpack solution vector.
+   ! Unpack solution vector.
 
-s%xtra(xcore)  = x(1)
-s%xtra(ycore)  = x(2)
-s%xtra(xcomp)  = x(3)
-s%xtra(ycomp)  = x(4)
-s%xtra(vxcore) = x(5)
-s%xtra(vycore) = x(6)
-s%xtra(vxcomp) = x(7)
-s%xtra(vycomp) = x(8)
-s%xtra(omega)  = x(9)
-s%xtra(M_ns)   = x(10)
-s%xtra(M_acc)  = x(11)
-e_inj          = x(12)
+   s%xtra(ixcore)  = x(1)
+   s%xtra(iycore)  = x(2)
+   s%xtra(ixcomp)  = x(3)
+   s%xtra(iycomp)  = x(4)
+   s%xtra(ivxcore) = x(5)
+   s%xtra(ivycore) = x(6)
+   s%xtra(ivxcomp) = x(7)
+   s%xtra(ivycomp) = x(8)
+   s%xtra(iomega)  = x(9)
+   s%xtra(iM_ns)   = x(10)
+   s%xtra(iM_acc)  = x(11)
+   e_inj           = x(12)
 
-! Add energy to MESA grid.
+   ! Add energy to MESA grid. Note that this is done using updated positions/
+   ! velocities; consider whether this should be done using pre-update values,
+   ! and if higher-order integrator is used, whether we should iterate to
+   ! convergence for this timestep.
 
-r = sqrt( (s%xtra(xcomp) - s%xtra(xcore))**2 + &
-          (s%xtra(ycomp) - s%xtra(ycore))**2 )
-call get_relative_velocity(s, r, s%xtra(xcore), s%xtra(ycore), &
-                           s%xtra(xcomp), s%xtra(ycomp), &
-                           s%xtra(vxcore), s%xtra(vycore), &
-                           s%xtra(vxcomp), s%xtra(vycomp), v_rel)
-call add_energy_to_mesa(s, r, s%xtra(M_ns), v_rel, -e_inj)
+   r = sqrt( (s%xtra(ixcomp) - s%xtra(ixcore))**2 + &
+            (s%xtra(iycomp) - s%xtra(iycore))**2 )
 
-return
+   s%xtra(ia) = r !A: added this to keep track of separation in the force prescription as well
+   call get_relative_velocity_force_rhs(s, r, s%xtra(ixcore), s%xtra(iycore), &
+                              s%xtra(ixcomp), s%xtra(iycomp), &
+                              s%xtra(ivxcore), s%xtra(ivycore), &
+                              s%xtra(ivxcomp), s%xtra(ivycomp), &
+                              vx_rel, vy_rel, v_rel)
+   call add_energy_to_mesa(s, r, s%xtra(iM_ns), v_rel, e_inj)
+
+   return
 end subroutine advance_force_prescription
 
 ! ------------------------------------------------------------------------------
@@ -285,55 +288,59 @@ end subroutine advance_force_prescription
 ! Return the right-hand-side of the differential equations describing the
 ! companion's orbit and spin for the energy prescription.
 
-subroutine energy_prescrip_rhs(t, x, dxdt, s)
+subroutine energy_prescrip_rhs(s, t, x, dxdt)
 
-real(dp), intent(in)                     :: t, x(:)
-real(dp), intent(out)                    :: dxdt(:)
-type (star_info), pointer, intent(inout) :: s
+   real(dp), intent(in)                     :: t, x(:)
+   real(dp), intent(out)                    :: dxdt(:)
+   type (star_info), pointer, intent(inout) :: s
 
-!TODO
+   real(dp) :: a_orb, omega, mns, macc, v_rel, rho, menc, mdot, fd, edot, &
+               e_inj, omegadot, e, beta, Q, strain
 
-return
+   !print *, 'energy_prescrip_rhs called'
+   a_orb    = x(1)
+   omega    = x(2)
+   mns      = x(3)
+   macc     = x(4)
+   e_inj    = x(5)
+
+   ! Interpolate needed quantitites from MESA model
+   call interpolate(a_orb, rho, s%R, s%rho)
+   call interpolate(a_orb, menc, s%R, s%m)
+
+   ! Relative velocity
+   call get_relative_velocity_energy_rhs(s, a_orb, mns, menc, v_rel)
+   
+   ! Get accretion rate using MR15
+   ! Ignore fd and edot from this model
+   call mr15(s, a_orb, mns, rho, v_rel, mdot, fd, edot)
+
+   ! Get drag and power using Kim & Kim (2010)
+   if (drag_prescription == MR15_DRAG) then
+      print *, 'Using MR15 drag prescription'
+      call mr15(s, a_orb, mns, rho, v_rel, mdot, fd, edot)
+   else if (drag_prescription == KIM07_DRAG) then
+      print *, 'Using Kim 2007 drag prescription'
+      call kim2007(s, a_orb, mns, rho, v_rel, fd, edot)
+   else if (drag_prescription == KIM10_DRAG) then
+      print *, 'Using Kim & Kim 2010 drag prescription'
+      call kim2010(s, a_orb, mns, rho, v_rel, fd, edot)
+   end if
+
+   ! Get spinup rate
+   call get_spinup_rate(s, mns, macc, mdot, omega, omegadot, e, beta, Q)
+
+   dxdt(1) = -1 * edot * (((standard_cgrav*mns*menc)/(2 * a_orb**2) - (standard_cgrav*mns/(2*a_orb))*(4 * pi * a_orb**2 * rho))**(-1))
+   dxdt(2) = omegadot
+   dxdt(3) = mdot
+   dxdt(4) = mdot
+   dxdt(5) = edot
+
+   ! Get strain
+   call get_strain(s, Q, omega, D, strain)
+
+   return
 end subroutine energy_prescrip_rhs
-
-! ------------------------------------------------------------------------------
-
-! Compute the relative velocity of the NS and the donor envelope.
-
-subroutine get_relative_velocity(s, r, xcore, ycore, xcomp, ycomp, &
-                                 vxcore, vycore, vxcomp, vycomp, v_rel)
-
-type (star_info), pointer, intent(in) :: s
-real(dp), intent(in)                  :: r
-real(dp), intent(out)                 :: v_rel
-
-real(dp)                              :: u
-
-!NOTES: significance of "100"? replace with a named constant
-!Should this be 100*Rsun?
-
-! Abha comment: Yes, this was something I wanted to discuss. The problem was that
-!               there are still radial surface oscillations in the primary star so
-!               at the beginning of the simulation, they affect the relative velocity
-!               of the neutron star with respect to the envelope quite drastically
-!               so I just told the code to not factor in the envelope velocity for
-!               until it plunges within some radius. I think the number 100 was there 
-!               because I was trying out different cases and didn't update this. But I 
-!               agree that it makes more sense to multiply it by Rsun.  
-
-if (r > 100) then
-  v_rel = sqrt( (vxcomp - vxcore + (s%xtra(omega_env)*(ycomp - ycore)))**2 + &
-                (vycomp - vycore - (s%xtra(omega_env)*(xcomp - xcore)))**2 )
-else 
-  call interpolate(r, u, s%R, s%u)
-  v_rel = sqrt( (vxcomp - vxcore + (s%xtra(omega_env)*(ycomp - ycore)) - &
-                 u*(xcomp - xcore)/r)**2 + &
-                (vycomp - vycore - (s%xtra(omega_env)*(xcomp - xcore)) - &
-                 u*(ycomp - ycore)/r)**2 )
-end if
-
-return
-end subroutine get_relative_velocity
 
 ! ------------------------------------------------------------------------------
 
@@ -342,81 +349,115 @@ end subroutine get_relative_velocity
 
 subroutine force_prescrip_rhs(t, x, dxdt, s)
 
-real(dp), intent(in)                     :: t, x(:)
-real(dp), intent(out)                    :: dxdt(:)
-type (star_info), pointer, intent(inout) :: s
+   real(dp), intent(in)                     :: t, x(:)
+   real(dp), intent(out)                    :: dxdt(:)
+   type (star_info), pointer, intent(inout) :: s
 
-real(dp) :: xcore, ycore, xcomp, ycomp, vxcore, vycore, vxcomp, vycomp, &
-            omega, mns, macc, r, v_rel, rho, menc, mdot, fd, edot, &
-            Eorb, dErob, Ra, mdot_hl, fd_hl, edot_hl, mdot_edd, mdot_hyper, &
-            cs, mach, e_inj
+   real(dp) :: xcore, ycore, xcomp, ycomp, vxcore, vycore, vxcomp, vycomp, &
+               omega, mns, macc, r, v_rel, rho, menc, mdot, fd, edot, &
+               e_inj, omegadot, vx_rel, vy_rel, e, beta, Q, strain
 
-xcore   = x(1)
-ycore   = x(2)
-xcomp   = x(3)
-ycomp   = x(4)
-vxcore  = x(5)
-vycore  = x(6)
-vxcomp  = x(7)
-vycomp  = x(8)
-omega   = x(9)
-mns     = x(10)
-macc    = x(11)
-e_inj   = x(12)
+   xcore   = x(1)
+   ycore   = x(2)
+   xcomp   = x(3)
+   ycomp   = x(4)
+   vxcore  = x(5)
+   vycore  = x(6)
+   vxcomp  = x(7)
+   vycomp  = x(8)
+   omega   = x(9)
+   mns     = x(10)
+   macc    = x(11)
+   e_inj   = x(12)
 
-r = sqrt( (xcore - xcomp)**2 + (ycore - ycomp)**2 )
+   ! Get separation and relative velocity
+   r = sqrt( (xcore - xcomp)**2 + (ycore - ycomp)**2 )
+   call get_relative_velocity_force_rhs(s, r, xcore, ycore, xcomp, ycomp, &
+                              vxcore, vycore, vxcomp, vycomp, &
+                              vx_rel, vy_rel, v_rel)
 
-call get_relative_velocity(s, r, xcore, ycore, xcomp, ycomp, &
-                           vxcore, vycore, vxcomp, vycomp, v_rel)
+   ! Interpolate needed quantities from MESA model
+   call interpolate(r, rho, s%R, s%rho)
+   call interpolate(r, menc, s%R, s%m)
 
-! Get accretion rate
-call interpolate(r, rho, s%R, s%rho)
-call interpolate(r, menc, s%R, s%m)
-call hl_and_energy(s, mns, r, v_rel, rho, menc, mdot_hl, fd_hl, edot_hl, &
-                   Eorb, dEorb, Ra)
-call mr15(s, r, Ra, mdot_hl, fd_hl, mdot, fd)
-call edd_and_hyper(mns, mdot_edd, mdot_hyper)
+   ! Get accretion rate using MR15
+   ! Ignore fd and edot from this model
+   call mr15(s, r, mns, rho, v_rel, mdot, fd, edot)
 
-if (eta*mdot >= mdot_hyper .or. eta*mdot <= mdot_edd) then
-  mdot = eta*mdot
-else
-  mdot = mdot_edd
-end if
+   ! Get drag and power using Kim & Kim (2010)
+   if (drag_prescription == MR15_DRAG) then
+      print *, 'Using MR15 drag prescription'
+      call mr15(s, r, mns, rho, v_rel, mdot, fd, edot)
+   else if (drag_prescription == KIM07_DRAG) then
+      print *, 'Using Kim 2007 drag prescription'
+      call kim2007(s, r, mns, rho, v_rel, fd, edot)
+   else if (drag_prescription == KIM10_DRAG) then
+      print *, 'Using Kim & Kim 2010 drag prescription'
+      call kim2010(s, r, mns, rho, v_rel, fd, edot)
+   end if
 
-! Get drag and power
-call interpolate(r, cs, s%R, s%csound)
-mach = v_rel / cs
-call kim2010(s, mach, r, Ra, cs, rho, v_rel, mns, fd)
-edot = fd * v_rel
+   ! Get spinup rate
+   call get_spinup_rate(s, mns, macc, mdot, omega, omegadot, e, beta, Q)
 
-dxdt(1)  = vxcore
-dxdt(2)  = vycore
-dxdt(3)  = vxcomp
-dxdt(4)  = vycomp
-dxdt(5)  = standard_cgrav*mns*(xcomp - xcore)/r**3
-dxdt(6)  = standard_cgrav*mns*(ycomp - ycore)/r**3
-!NOTES: significance of 100*Rsun? see note above
-if (r > 100*Rsun) then
-  dxdt(7)  = standard_cgrav*menc*(xcomp - xcore)/r**3 + &
-            fd*(vxcomp - vxcore + s%xtra(omega_env)*(ycomp - ycore))/(mns*v_rel)
-  dxdt(8)  = standard_cgrav*menc*(ycomp - ycore)/r**3 + &
-            fd*(vycomp - vycore - s%xtra(omega_env)*(xcomp - xcore))/(mns*v_rel)
-else
-  dxdt(7)  = standard_cgrav*menc*(xcomp - xcore)/r**3 + &
-             fd*(vxcomp - vxcore + s%xtra(omega_env)*(ycomp - ycore) - &
-             (s%u(azone)*(xcomp - xcore))/r)/(mns*v_rel)
-  dxdt(8)  = standard_cgrav*menc*(ycomp - ycore)/r**3 + &
-             fd*(vycomp - vycore - s%xtra(omega_env)*(xcomp - xcore) - &
-             (s%u(azone)*(ycomp - ycore)/r)/(mns*v_rel)
-endif
-!TODO
-dxdt(9)  = ...
-dxdt(10) = mdot
-dxdt(11) = mdot
-dxdt(12) = edot
+   dxdt(1)  = vxcore
+   dxdt(2)  = vycore
+   dxdt(3)  = vxcomp
+   dxdt(4)  = vycomp
+   dxdt(5)  = standard_cgrav*mns*(xcomp - xcore)/r**3
+   dxdt(6)  = standard_cgrav*mns*(ycomp - ycore)/r**3
+   dxdt(7)  = standard_cgrav*menc*(xcore - xcomp)/r**3 - fd*vx_rel/(mns*v_rel)
+   dxdt(8)  = standard_cgrav*menc*(ycore - ycomp)/r**3 - fd*vy_rel/(mns*v_rel)
+   dxdt(9)  = omegadot
+   dxdt(10) = mdot
+   dxdt(11) = mdot
+   dxdt(12) = edot
 
-return
+   ! Get strain
+   call get_strain(s, Q, omega, D, strain)
+
+   return
 end subroutine force_prescrip_rhs
+
+! ------------------------------------------------------------------------------
+
+! Compute the relative velocity of the NS and the donor envelope.
+
+subroutine get_relative_velocity_energy_rhs(s, r, mns, menc, v_rel)
+
+   type (star_info), pointer, intent(in) :: s
+   real(dp), intent(in)                  :: r, mns, menc
+   real(dp), intent(out)                 :: v_rel
+
+   v_rel = SQRT(standard_cgrav*(mns + menc)/r) - s%xtra(iomega_env)*r
+
+   return
+end subroutine get_relative_velocity_energy_rhs
+
+subroutine get_relative_velocity_force_rhs(s, r, xcore, ycore, xcomp, ycomp, &
+                                 vxcore, vycore, vxcomp, vycomp, &
+                                 vx_rel, vy_rel, v_rel)
+
+   type (star_info), pointer, intent(in) :: s
+   real(dp), intent(in)                  :: r, xcore, ycore, xcomp, ycomp, &
+                                            vxcore, vycore, vxcomp, vycomp
+   real(dp), intent(out)                 :: vx_rel, vy_rel, v_rel
+
+   real(dp)                              :: u
+
+   vx_rel = vxcomp - vxcore + s%xtra(iomega_env)*(ycomp - ycore) 
+   vy_rel = vycomp - vycore - s%xtra(iomega_env)*(xcomp - xcore)
+
+   if (r <= v_rel_const*Rsun) then
+      call interpolate(r, u, s%R, s%u)
+      vx_rel = vx_rel - u*(xcomp - xcore)/r
+      vy_rel = vy_rel - u*(ycomp - ycore)/r
+   end if
+
+   v_rel = sqrt( vx_rel**2 + vy_rel**2 )
+
+   return
+end subroutine get_relative_velocity_force_rhs
+
 
 ! ------------------------------------------------------------------------------
 
@@ -425,159 +466,179 @@ end subroutine force_prescrip_rhs
 
 subroutine add_energy_to_mesa(s, r, mns, v_rel, e_inj)
 
-type (star_info), pointer, intent(inout) :: s
-real(dp), intent(in)                     :: r, mns, v_rel, e_inj, junk
+   type (star_info), pointer, intent(inout) :: s
+   real(dp), intent(in)                     :: r, mns, v_rel, e_inj
 
-real(dp) :: rho, menc, Ra, kernel_sum
-integer  :: n, j1, j2, j
-real(dp), allocatable :: temp_heat(:)
+   real(dp) :: rho, Ra, kernel_sum, junk
+   integer  :: n, j1, j2, j
+   real(dp), allocatable :: temp_heat(:)
 
-! Get the accretion radius and the indices of zones we will modify
+   ! Get the accretion radius and the indices of zones we will 
+   Ra = 2*standard_cgrav*mns/v_rel**2
 
-n = size(s%R)
-call interpolate(r, rho, s%R, s%rho)
-call interpolate(r, menc, s%R, s%m)
-call hl_and_energy(s, mns, r, v_rel, rho, menc, junk, junk, junk, junk, junk, &
-                   Ra)
-call hunt(s%R, n, r-Ra, j1)
-call hunt(s%R, n, r+Ra, j2)
-j1 = max(j1, 1)
-j2 = max(j2, 1)
+   n = size(s%R)
+   call interpolate(r, rho, s%R, s%rho)
+   call get_hl_accretion(mns, rho, v_rel, junk, junk, junk, Ra)
+   call hunt(s%R, n, r-Ra, j1)
+   call hunt(s%R, n, r+Ra, j2)
+   j1 = max(j1, 1)
+   j2 = max(j2, 1)
 
-! Set up the temporary array to keep track of the energy added
+   ! Set up the temporary array to keep track of the energy added
 
-allocate(temp_heat(n))
-temp_heat(:) = 0.
-kernel_sum = 0.
+   allocate(temp_heat(n))
+   temp_heat(:) = 0.
+   kernel_sum = 0.
 
-! Compute the heating kernel
+   ! Compute the heating kernel
 
-do j = j1, j2
-  ! NOTES: not sure I have translated this correctly.
-  temp_heat(j) = exp(-((r-s%R(j))/Ra)**2)
-  kernel_sum = kernel_sum + temp_heat(j)*s%dm(j)
-enddo
+   do j = j2, j1
+   ! NOTES: not sure I have translated this correctly.
+   ! I think it is correct
+   temp_heat(j) = exp(-((r-s%R(j))/Ra)**2)
+   kernel_sum = kernel_sum + temp_heat(j)*s%dm(j)
 
-do j = j1, j2
-  s%extra_heat(j)%val = s%extra_heat(j)%val + &
-                        efactor * temp_heat(j) * e_inj / kernel_sum
-enddo
+   enddo
 
-deallocate(temp_heat)
+   do j = j2, j1
+   s%extra_heat(j)%val = s%extra_heat(j)%val + &
+                           efactor * temp_heat(j) * e_inj / (kernel_sum * s%dt_next)
+   enddo
 
-return
+   print *, 'Energy injected into MESA: ', e_inj, 'erg'
+   print *, 'sum of injected energy in kernels: ', SUM(s%extra_heat(j2:j1)%val * s%dm(j2:j1) * s%dt_next), 'erg'
+
+   deallocate(temp_heat)
+
+   return
 end subroutine add_energy_to_mesa
 
 ! ------------------------------------------------------------------------------
 
 ! Kim 2007 drag force calculation
 
-subroutine kim2007(s, mach_in, r_in, rho_in, v_in, M_in, fd_out)
+subroutine kim2007(s, r, M, rho, v_rel, fd_out, edot_out)
 
-type (star_info), pointer, intent(in) :: s
-real(dp), intent(in)                  :: M_in, mach_in, a_in
-real(dp, intent(out)                  :: fd_out
+   type (star_info), pointer, intent(in) :: s
+   real(dp), intent(in)                  :: r, M, rho, v_rel
+   real(dp), intent(out)                  :: fd_out, edot_out
 
-if (mach_in < 1.0) then
-  fd_out = 0.7706*LOG((1+mach_in)/(1.0004 - 0.9185*mach_in)) - 1.473*mach_in
-else if (mach_in >= 1.0 .and. mach_in < 4.4) then
-  fd_out = LOG(330*(r_in*(mach_in-0.71)**5.72)/(R0*mach_in**9.58))
-else
-  fd_out = LOG(r_in / (R0*(0.11*mach_in + 1.65)))
-end if
-fd_out = fd_out*(4*pi*rho_in*((standard_cgrav*M_in)**2)/(v_in**2))
+   real(dp) :: cs, mach, junk, Ra
 
-return
+   call get_hl_accretion(M, rho, v_rel, junk, junk, junk, Ra)
+   call interpolate(r, cs, s%R, s%csound)
+   mach = v_rel / cs
+
+   if (mach < 1.0) then
+      fd_out = 0.7706*LOG((1+mach)/(1.0004 - 0.9185*mach)) - 1.473*mach
+   else if (mach >= 1.0 .and. mach < 4.4) then
+      fd_out = LOG(330*(r*(mach-0.71)**5.72)/(Ra*mach**9.58))
+   else
+      fd_out = LOG(r / (Ra*(0.11*mach + 1.65)))
+   end if
+      fd_out = fd_out * 4*pi*rho*(standard_cgrav*M/v_rel)**2
+      edot_out = fd_out * v_rel
+   return
 end subroutine kim2007
 
 ! ------------------------------------------------------------------------------
 
 ! Kim & Kim 2010 drag force calculation
 
-subroutine kim2010(s, mach_in, a_in, Ra_in, cs_in, rho_in, v_in, M_in, fd_out)
+subroutine kim2010(s, r, M, rho, v_rel, fd_out, edot_out)
 
-type (star_info), pointer, intent(in) :: s
-real(dp), intent(in)                  :: M_in, mach_in, a_in, Ra_in, v_in, &
-                                         cs_in, rho_in
-real(dp), intent(out)                 :: fd_out
+   type (star_info), pointer, intent(in) :: s
+   real(dp), intent(in)                  :: r, M, rho, v_rel
+   real(dp), intent(out)                 :: fd_out, edot_out
 
-integer  :: k
-real(dp) :: i_var, beta, eta_b, cd
+   integer  :: k
+   real(dp) :: i_var, beta, eta_b, cd, rho_nl
+   real(dp) :: cs, mach, junk, Ra
 
-beta = standard_cgrav*M_in/(a_in*cs_in**2)   !dimensionless
-eta_b = beta/(mach_in**2 - 1)                !dimensionless
-cd = 0.002
+   call get_hl_accretion(M, rho, v_rel, junk, junk, junk, Ra)
+   call interpolate(r, cs, s%R, s%csound)
+   mach = v_rel / cs
 
-if (mach_in < 1.01) then
-  i_var = 0.7706*LOG((1+mach_in)/(1.0004 - 0.9185*mach_in)) - 1.473*mach_in
-else if (mach_in >= 1.01 .and. mach_in < 4.4) then
-  i_var = LOG(330*(a_in*(mach_in-0.71)**5.72)/(Ra_in*mach_in**9.58))
-else
-  i_var = LOG(a_in / (Ra_in*(0.11*mach_in + 1.65)))
-end if
+   beta  = standard_cgrav*M/(r*cs**2)   !dimensionless
+   eta_b = beta/(mach**2 - 1)           !dimensionless
+   cd    = 1
 
-if (eta_b > 0.1 .and. mach_in > 1.01) then
-  fd_out = -cd*0.7*4*pi*rho_in* &
-           (1 + 0.46*(beta**1.1)/(mach_in**2 - 1)**0.11)* &
-           (standard_cgrav*(M_in**2))/((v_in**2)*(eta_b**0.5))
-else
-  fd_out = -cd*4*pi*rho_in*(standard_cgrav*(M_in**2))*i_var/(v_in**2)
-end if
+   rho_nl = rho * (1 + 0.46*beta**1.1 / (mach**2 -1)**0.11)
 
-return
+   if (mach < 1.01) then
+      i_var = 0.7706*LOG((1+mach)/(1.0004 - 0.9185*mach)) - 1.473*mach
+   else if (mach >= 1.01 .and. mach < 4.4) then
+      i_var = LOG(330*(r*(mach-0.71)**5.72)/(Ra*mach**9.58))
+   else
+      i_var = LOG(r / (Ra*(0.11*mach + 1.65)))
+   end if
+
+   if (eta_b > 0.1 .and. mach > 1.01) then
+      fd_out = cd * (4 * pi * rho_nl * &
+            ((standard_cgrav * M / v_rel)**2) ) * (0.7/eta_b**0.5)
+   else
+      fd_out = cd * (4 * pi * rho * &
+            ((standard_cgrav * M / v_rel)**2) ) * i_var
+   end if
+
+   edot_out = fd_out * v_rel
+
+   return
 end subroutine kim2010
 
 ! ------------------------------------------------------------------------------
 
 ! MR15 accretion and drag force calculation
 
-subroutine mr15(s, r_in, Ra_in, mdot_hl, fd_hl, mdotut_out, fd_out)
+subroutine mr15(s, r, M, rho, v_rel, mdot_out, fd_out, edot_out)
 
-type (star_info), pointer, intent(in) :: s
-real(dp), intent(in)                  :: r_in, Ra_in, mdot_hl, fd_hl
-real(dp), intent(out)                 :: fd_out
+   type (star_info), pointer, intent(in) :: s
+   real(dp), intent(in)                  :: r, M, rho, v_rel
+   real(dp), intent(out)                 :: mdot_out, fd_out, edot_out
 
-real(dp), parameter :: f1 = 1.91791946, f2 = -1.52814698, f3 = 0.75992092, &
-                       mu1 = -2.14034214, mu2 = 1.94694764, mu3 = 1.19007536, &
-                       mu4 = 1.05762477
-real(dp)            :: rsc, eps_rho, fd_mr15_ratio, mdot_mr15_ratio
+   real(dp), parameter :: f1  = 1.91791946,  f2  = -1.52814698, f3 = 0.75992092, &
+                        mu1 = -2.14034214, mu2 = 1.94694764,  mu3 = 1.19007536, &
+                        mu4 = 1.05762477
+   real(dp)            :: rsc, eps_rho, fd_mr15_ratio, mdot_mr15_ratio
+   real(dp)            :: mdot_hl, fd_hl, edot_hl, Ra, mdot_edd, mdot_hyper
 
-call interpolate(r_in, rsc, s%R, s%scale_height)
+   call get_hl_accretion(M, rho, v_rel, mdot_hl, fd_hl, edot_hl, Ra)
+   call edd_and_hyper(M, mdot_edd, mdot_hyper)
+   call interpolate(r, rsc, s%R, s%scale_height)
 
-eps_rho         = Ra_in / rsc ! dimensionless
-fd_mr15_ratio   = f1 + f2*eps_rho + f3*(eps_rho**2) ! dimensionless
-mdot_mr15_ratio = 10**(mu1 + mu2/(1 + mu3*eps_rho + mu4*(eps_rho**2))) !dimless
-mdot_out        = mdot_mr15_ratio*mdot_hl !g/s
-fd_out          = fd_mr15_ratio*fd_hl !dyne (g cm s^-2)
+   eps_rho         = Ra / rsc
+   fd_mr15_ratio   = f1 + f2*eps_rho + f3*eps_rho**2
+   mdot_mr15_ratio = 10**(mu1 + mu2/(1 + mu3*eps_rho + mu4*eps_rho**2))
+   mdot_out        = eta * mdot_mr15_ratio * mdot_hl
+   fd_out          = eta * fd_mr15_ratio * fd_hl
 
-return
+   if ((mdot_edd < mdot_out) .and. (mdot_out < mdot_hyper)) then
+      mdot_out = mdot_edd
+      fd_out   = mdot_edd * v_rel 
+   end if
+
+   edot_out = fd_out * v_rel
+
+   return
 end subroutine mr15
 
 ! ------------------------------------------------------------------------------
 
-! Hoyle-Lyttleton accretion and energy calculation  
+! Hoyle-Lyttleton accretion radius, accretion rate, drag force, and energy
+! loss rate
 
-subroutine hl_and_energy(s, M, r_in, v_in, rho_in, menc_in, mdot_hl, fd_hl, &
-                         edot_hl, Eorb, dEorb, Ra)
+subroutine get_hl_accretion(M, rho, v_rel, mdot_hl, fd_hl, edot_hl, Ra)
 
-type (star_info), pointer, intent(in) :: s
-real(dp), intent(in)                  :: M, r_in, v_in, rho_in, menc_in
-real(dp), intent(out)                 :: mdot_hl, fd_hl, edot_hl, Eorb, dEorb, &
-                                         Ra
+   real(dp), intent(in)                  :: M, rho, v_rel
+   real(dp), intent(out)                 :: mdot_hl, fd_hl, edot_hl, Ra
 
-! mass is in g, radius is in cm, time is in s
+   Ra      = 2*standard_cgrav*M/v_rel**2       !cm
+   mdot_hl = pi*(Ra**2)*rho*v_rel              !g/s
+   fd_hl   = mdot_hl*v_rel                     !dyne (g cm s^-2)
+   edot_hl = fd_hl*v_rel                       !erg/s
 
-Ra      = 2*standard_cgrav*M/(v_in**2)       !cm
-mdot_hl = pi*(Ra**2)*rho_in*v_in             !g/s
-fd_hl   = mdot_hl*v_in                       !dyne (g cm s^-2)
-edot_hl = fd_hl*v_in                         !erg/s
-      
-Eorb    = standard_cgrav*M*menc_in/(2*r_in)  !erg
-dEorb   = (standard_cgrav*M/(2*r_in))*(menc_in/r_in - 4*pi*(r_in**2)*rho_in)
-                                             !erg/cm
-
-return
-end subroutine hl_and_energy
+   return
+end subroutine get_hl_accretion
 
 ! ------------------------------------------------------------------------------
 
@@ -585,219 +646,173 @@ end subroutine hl_and_energy
 
 subroutine edd_and_hyper(M, mdot_edd, mdot_hyper)
 
-real(dp), intent(in)  :: M
-real(dp), intent(out) :: mdot_edd, mdot_hyper
+   real(dp), intent(in)  :: M
+   real(dp), intent(out) :: mdot_edd, mdot_hyper
 
-! mass is in g, radius is in cm, time is in s
+   mdot_edd   = 3.5d-8*(M/(1.33*Msun))*(0.34/op_const)*Msun/secyer      !gm/s
+   mdot_hyper = 8.9d-5*((op_const/0.34)**(-0.73))*Msun/secyer    !gm/s
 
-mdot_edd   = 3.5*(1d-8)*(M/(1.33*Msun))*(0.34/op_const)*Msun/secyer      !gm/s
-mdot_hyper = 8.9*(1d-5)*((op_const/0.34)**(-0.73))*Msun/secyer           !gm/s
-
-return
+   return
 end subroutine edd_and_hyper
 
 ! ------------------------------------------------------------------------------
 
-! Find the equatorial radius and beta secular for the NS
+! Solve equations 34/35 of Holgado et al. for the ellipticity and spin parameter
+! of a Maclaurin spheroid with given mass and spin frequency. The spin parameter
+! is not permitted to exceed the value corresponding to secular instability.
+! NOTES: if omega wants to drive beta to be > beta_sec, shouldn't this limit
+! omega as well as e? If so, what's the best way to handle this?
 
-!TODO
-subroutine Req_and_beta(e1, Req1, Rbar1, beta1)
+subroutine get_e_beta_given_omega(M, omega, e, beta)
 
-real(dp), intent(in)  :: e1
-real(dp), intent(out) :: Req1, Rbar1, beta1
-   
-beta1 = 3*(1 - ((e1*sqrt(1-e1**2))/(asin(e1))))/(2*e1**2) - 1  !dimensionless
-Rbar1 = R0*((asin(e1) * ((1-e1**2)**(1/6)) * (1-beta1)) / e1)**(-1 * n_poly / &
-        (3-n_poly))                                            !cm
-Req1 = Rbar1/((1-e1**2)**(1/6))                                !cm
+   real(dp), intent(in)  :: M, omega
+   real(dp), intent(out) :: e, beta
 
-return
-end subroutine Req_and_beta
+   real(dp), parameter :: tol = 1.e-6, kappan = 1.
+   integer, parameter  :: max_iter = 100
+   real(dp)            :: rhobar, qn, ofctn_val, emin, emax, enxt, onxt
+   integer             :: n_iter
 
-! ------------------------------------------------------------------------------
+   n_iter    = 0
+   onxt      = huge(1.)
+   qn        = (1 - n_poly/5)*kappan               ! Holgado et al. eqn 36
+   rhobar    = 3*M/(4*pi*R0**3)                    ! Holgado et al. after eqn 35
+   ofctn_val = omega**2 / (2*pi*standard_cgrav*rhobar/qn)
+                                                   ! Holgado et al. eqn 35
+   emin      = 1.e-9
+   emax      = 0.817    !NOTES: does this correspond to beta = beta_sec?
+                        !Got the 0.817 number from original code, and it
+                        !corresponds to beta = 0.14, which seems to match
+                        !figure 3 of Holgado et al.
 
-! Evaluate the omega function and solve for the inverse
+   ! bisection
+   do while ((abs(onxt) > tol) .and. (n_iter < max_iter))
+   enxt = (emin + emax) / 2
+   onxt = sqrt(1-e**2)/e**3*(3-2*e**2)*asin(e) - 3*(1-e**2)/e**2 - ofctn_val
+                                                   ! Holgado et al. eqn 35
+   if (onxt > 0.) then
+      emax = enxt
+   else
+      emin = enxt
+   end if
 
-!TODO
-subroutine omega_function(e1, M, omega1)
+   n_iter = n_iter + 1
+   end do
 
-real(dp), intent(in)  :: e1, M
-real(dp), intent(out) :: omega1
-real(dp)              :: rho_bar, qn
+   e    = enxt
+   beta = 3./(2*e**2)*(1 - e*(1 - e**2)**0.5/asin(e)) - 1
+                                                         ! Holgado et al. eqn 34
 
-rho_bar = 3*M/(4*pi*(R0**3))      !gm/cm^3
-qn = (1-n_poly/5)                 !dimensionless
-   
-omega1 = sqrt(2*pi*standard_cgrav*rho_bar* &
-              ((sqrt(1-e1**2)*(3-2*e1**2)*asin(e1)/(e1**3)) - &
-               3*(1-e1**2)/(e1**2) )/qn) !Hz
-
-return
-end subroutine omega_function
-
-! ------------------------------------------------------------------------------
-
-! Solve for the inverse of the omega function
-
-!TODO
-subroutine omega_func_solve_inverse(e_in, omega_val, tol, M, e_out)
-
-real(dp), intent(in)  :: e_in, omega_val, tol, M
-real(dp), intent(out) :: e_out
-
-real(dp) :: e1, omega1
-integer  :: iterations
-
-iterations = 0
-
-e1 = e_in !dimensionless
-call omega_function(e1, M, omega1)
-
-do while (abs(omega1 - omega_val) >= tol .and. iterations < 100)
-  e1 = e1*omega_val/omega1
-  call omega_function(e1, M, omega1)
-  iterations = iterations + 1
-end do
-
-e_out = e1 !dimensionless
-
-return
-end subroutine omega_func_solve_inverse
+   return
+end subroutine get_e_beta_given_omega
 
 ! ------------------------------------------------------------------------------
 
-! Evaluate the spin evolution and quadrupole moment evolution
+! Get the rate of change of the spin frequency
 
-!TODO
-subroutine omega_and_q(id, ierr, M, omega_function)
+subroutine get_spinup_rate(s, M, Macc, Mdot, omega, omegadot, e, beta, Q)
 
-integer, intent(in) :: id
-integer, intent(out) :: ierr
-type (star_info), pointer :: s
+   type (star_info), pointer, intent(in) :: s
+   real(dp), intent(in)                  :: M, Macc, Mdot, omega
+   real(dp), intent(out)                 :: omegadot, e, beta, Q
 
-!subroutine variables
-real(dp), intent(in) :: M, omega_function
-integer :: i
+   real(dp)            :: Rbar, Req, Rz, Imom, Qtb, Qmax, Nacc, Ngw
 
-!calling star pointer
-ierr = 0
-call star_ptr(id, s, ierr)
-if (ierr /= 0) return
-Qmax_next = 4*1d39*(M_acc_next/M_crust)             !g cm^2
-                     
-if (s%x_ctrl(14) /= s%x_ctrl(15)) then
-  call forward_euler(s%xtra(omega_curr), omega_function, s%dt_next, omega_next)  !Hz
-else 
-  call forward_euler(s%xtra(omega_curr), omega_function, 0d0, omega_next)          !Hz
-end if
+   ! Given M and omega, solve for e and beta via equations 34/35 of Holgado et al.
+   call get_e_beta_given_omega(M, omega, e, beta)
 
-call omega_func_solve_inverse(s%xtra(e_curr), omega_next, 1d-9, M, e_next)
+   Rbar = R0 * (asin(e)/e * (1 - e**2)**(1./6.) * (1 - beta))**(-n_poly/(3-n_poly))
+                                                         ! Holgado et al. eqn 38
+   Req  = Rbar / (1 - e**2)**(1./6.)                     ! Holgado et al. eqn 37
+   Qtb  = sqrt((5./32.)*clight**5/(standard_cgrav*omega**5)*Mdot * &
+               sqrt(standard_cgrav*M*Req))               ! Holgado et al. eqn 19
+   Qmax = Qmax_const*Macc/(M_crust)                  ! Holgado et al. eqn 40
+   Imom     = (2.*M/5.) * R0**2                          ! Holgado et al. after eqn 16  !(M/5.) * (Rz**2 + Req**2)
 
-aa_next = R0*(1 + e_next/2)                        !cm
-bb_next = R0*(1 - e_next/2)                        !cm
-mom_inert_next = M*(aa_next**2 + bb_next**2)/5     !gm cm^2
+   ! I think this should be if (Qtb < Qmax). Eqn 41 of the paper should probably have
+   ! max(Qmax, Qtb) instead of min(Qmax, Qtb), if the text following the equation is 
+   ! correct.
+   if (Qtb > Qmax) then
+      !Rz       = Req*(1 - e)                      ! from defn of ellipticity
+      Q        = Qmax                              ! Holgado et al. eqn 41
+                                                   ! NOTES: inconsistency with eqn 16?
+      Nacc     = Mdot*sqrt(standard_cgrav*M*Req)   ! Holgado et al. eqn 4
+      Ngw      = -(32./5.)*standard_cgrav*omega**5*Q**2/clight**5
+                                                   ! Holgado et al. eqn 14/15
+      omegadot = (Nacc + Ngw) / Imom               ! Holgado et al. eqn 17
+   else
+      Q        = Qtb                               ! Holgado et al. eqn 41
+      omegadot = 0.
+   endif
 
-call Req_and_beta(e_next, Req, Rbar, beta)
-Qtb_next = sqrt((5*(clight**5)*mdot*sqrt(standard_cgrav*M*Req))/(32*standard_cgrav*(omega_next**5))) !g cm^2
-if (Qtb_next > Qmax_next) then
-  Q_next = Qmax_next*exp(-1*s%time*mdot/M_crust)   !g cm^2
-  decay_coeff = exp(-1*s%time*mdot/M_crust)        !dimensionless
-else
-  Q_next = Qtb_next !g cm^2
-  decay_coeff = exp(-1*s%time*mdot/M_crust) !dimensionless
-end if
+   s%xtra(imom_inert) = Imom
+   s%xtra(iQmax) = Qmax
+   s%xtra(iQtb)  = Qtb
+   s%xtra(iQ)    = Q
 
-return
-end subroutine omega_and_q
+   return
+end subroutine get_spinup_rate
+
+! ------------------------------------------------------------------------------
+
+! Update all the s%xtra() quantities used to track the model, as well as any
+! quantities that will be stored to history files
 
 ! ------------------------------------------------------------------------------
 
 ! Print some useful information to stdout
 
-subroutine print_info()
+!TODO
+subroutine print_info(s)
 
-print *, 'model number                  = ', s% model_number
-print *, 'orbital separation            = ', s%xtra(a_curr)/Rsun
-print *, 'omega                         = ', s%xtra(omega_curr)
-print *, 'Q                             = ', s%xtra(Q_curr)
-print *, 'strain                        = ', s%xtra(strain_curr)
+   type (star_info), pointer, intent(in) :: s
 
-select case (prescription)
-  case (ENERGY_PRESCRIPTION)
-    print *, 'mach                  = ', v/csound
-    print *, 'edot                  = ', edot
-  case (FORCE_PRESCRIPTION)
-    print *, 'mach                  = ', v_rel/csound
-    print *, 'edot                  = ', -edot_br
-    ! print *, 'fd_br                  = ', fd_br
-    print *, 'xcore_curr            = ', s%xtra(xcore_curr)
-    print *, 'ycore_curr            = ', s%xtra(ycore_curr)
-    print *, 'xcomp_curr            = ', s%xtra(xcomp_curr)
-    print *, 'ycomp_curr            = ', s%xtra(ycomp_curr)
-    print *, 'vxcore_curr           = ', s%xtra(vxcore_curr)
-    print *, 'vycore_curr           = ', s%xtra(vycore_curr)
-    print *, 'vxcomp_curr           = ', s%xtra(vxcomp_curr)
-    print *, 'vycomp_curr           = ', s%xtra(vycomp_curr)
-    print *, 'total injected energy = ', &
-             efactor*SUM(s% extra_heat(1:s%nz)%val * s% dm(1:s%nz))*s%dt_next
-end select
+   print *, 'model number                  = ', s% model_number
+   print *, 'orbital separation            = ', s%xtra(ia)/Rsun
+   ! print *, 'omega                         = ', s%xtra(iomega)
+   ! print *, 'Q                             = ', s%xtra(iQ)
+   ! print *, 'strain                        = ', s%xtra(istrain)
+   print *, 'total injected energy = ', &
+               efactor*SUM(s% extra_heat(1:s%nz)%val * s% dm(1:s%nz))*s%dt_next
+   print *, 'M_acc                         = ', s%xtra(iM_acc)/Msun
+   select case (prescription)
+   case (ENERGY_PRESCRIPTION)
+      print *, '' 
+   case (FORCE_PRESCRIPTION)
+      print *, 'xcore_curr            = ', s%xtra(ixcore)
+      print *, 'ycore_curr            = ', s%xtra(iycore)
+      print *, 'xcomp_curr            = ', s%xtra(ixcomp)
+      print *, 'ycomp_curr            = ', s%xtra(iycomp)
+      print *, 'vxcore_curr           = ', s%xtra(ivxcore)
+      print *, 'vycore_curr           = ', s%xtra(ivycore)
+      print *, 'vxcomp_curr           = ', s%xtra(ivxcomp)
+      print *, 'vycomp_curr           = ', s%xtra(ivycomp)
+   end select
 
-print *, '##############################################################################'
-print *, 'ONE TIMESTEP DONE'
-print *, '##############################################################################'
+   print *, '##############################################################################'
+   print *, 'ONE TIMESTEP DONE'
+   print *, '##############################################################################'
 
-return
+   return
 end subroutine print_info
 
 ! ------------------------------------------------------------------------------
 
 !TODO
 !DONE: to evaluate the gravitational wave strain
-subroutine evaluate_strain(id, ierr)
-   !star variables
-   integer, intent(in) :: id
-   integer, intent(out) :: ierr
-   type (star_info), pointer :: s
+subroutine get_strain(s, Q, omega, D, strain)
 
-   !subroutine variables
-   real(dp) :: omega_func_curr
+   type (star_info), pointer, intent(in) :: s
+   real(dp), intent(in)                  :: Q, omega, D
+   real(dp), intent(out)                 :: strain
 
-   !calling star pointer
-   ierr = 0
-   call star_ptr(id, s, ierr)
-   if (ierr /= 0) return
+   !evaluate the strain using the current value of omega and Q
+   strain = 2 * standard_cgrav * Q * omega**2 / (D * clight**4)
+   
+   !update the s%xtra(istrain) quantity
+   s%xtra(istrain) = strain
 
-   if (s%model_number == 1) then
-      call Req_and_beta(s%xtra(e_curr), Req, Rbar, beta)
-      omega_next = s%xtra(omega_curr)                             !Hz
-      s%xtra(Qtb_curr) = sqrt((5*(clight**5)*mdot*sqrt(standard_cgrav*s%xtra(M_ns_curr)*Req))/(32*standard_cgrav*((s%xtra(omega_curr))**5))) !g cm^2
-      Qtb_next = s%xtra(Qtb_curr)                                 !g cm^2
-      Qmax_next = s%xtra(Qmax_curr)                               !g cm^2
-      s%xtra(Q_curr) = s%xtra(Qtb_curr)                           !g cm^2
-      Q_next = s%xtra(Q_curr)                                     !g cm^2
-      e_next = s%xtra(e_curr)                                     !dimensionless
-      aa_next = s%xtra(aa_curr)                                   !cm
-      bb_next = s%xtra(bb_curr)                                   !cm
-      mom_inert_next = s%xtra(mom_inert_curr)                     !gm cm^2
-
-      decay_coeff = 1                                             !dimensionless
-
-      s%xtra(strain_curr) = 2*standard_cgrav*((s%xtra(omega_curr))**2)*(s%xtra(Q_curr))/(D*(clight**4)) !dimensionless
-      strain_next = s%xtra(strain_curr)                            !dimensionless
-
-   else 
-      if (s%xtra(e_curr) > 0.817) then 
-         s%xtra(e_curr) = 0.817                               !dimensionless
-      end if
-
-      call Req_and_beta(s%xtra(e_curr), Req, Rbar, beta)
-      omega_func_curr = (mdot*sqrt(standard_cgrav*s%xtra(M_ns_curr)*Req) - (32*standard_cgrav*(s%xtra(omega_curr)**5)*(s%xtra(Q_curr)**2))/(5*clight**5))/s%xtra(mom_inert_curr)
-      call omega_and_q(id, ierr, M_ns_next, omega_func_curr)
-      strain_next = 2*standard_cgrav*(omega_next**2)*Q_next/(D*(clight**4))  !dimensionless
-
-   end if
-
-end subroutine evaluate_strain
+end subroutine get_strain
 
 ! ==============================================================================
 
@@ -806,7 +821,7 @@ end subroutine evaluate_strain
 ! Find location in a monotonically varying array corresponding to a given
 ! value, or 0 or N if out of range.
 
-subroutine hunt(xx, n, x, jlo)
+subroutine hunt(xx, n, x, jlo)  !why are there numbers in the beginning of some lines?
 
   INTEGER  :: jlo,n
   REAL(dp) :: x,xx(n)
@@ -856,25 +871,25 @@ end subroutine hunt
 
 subroutine interpolate(x, y, xtable, ytable)
 
-real(dp), intent(in)  :: x, xtable(:), ytable(:)
-real(dp), intent(out) :: y
+   real(dp), intent(in)  :: x, xtable(:), ytable(:)
+   real(dp), intent(out) :: y
 
-integer               :: jlo, n
-real(dp)              :: s
+   integer               :: jlo, n
+   real(dp)              :: s
 
-n = size(xtable)
-call hunt(xtable, n, x, jlo)
+   n = size(xtable)
+   call hunt(xtable, n, x, jlo)
 
-if ((jlo >= 1) .and. (jlo < n)) then
-  s = (ytable(jlo+1)-ytable(jlo)) / (xtable(jlo+1)-xtable(jlo))
-  y = ytable(jlo) + s*(x - xtable(jlo))
-elseif (jlo < 1) then
-  y = ytable(1)
-else
-  y = ytable(n)
-endif
+   if ((jlo >= 1) .and. (jlo < n)) then
+   s = (ytable(jlo+1)-ytable(jlo)) / (xtable(jlo+1)-xtable(jlo))
+   y = ytable(jlo) + s*(x - xtable(jlo))
+   elseif (jlo < 1) then
+   y = ytable(1)
+   else
+   y = ytable(n)
+   endif
 
-return
+   return
 end subroutine interpolate
 
 ! ==============================================================================
@@ -965,7 +980,7 @@ integer function extras_check_model(id)
    ! setting the corresponding termination_code_str value.
    ! termination_code_str(t_xtra1) = 'my termination condition'
 
-   if (s% xtra(a_curr) .lt. s%R(s%nz)) then
+   if (s% xtra(ia) .lt. s%R(s%nz)) then
       extras_check_model = terminate
       s% termination_code = t_xtra1
       termination_code_str(t_xtra1) = 'orbital separation less than core size'
@@ -986,12 +1001,13 @@ integer function how_many_extra_history_columns(id)
    call star_ptr(id, s, ierr)
    if (ierr /= 0) return
 
-!TODO
-   if (prescription == 1) then
-      how_many_extra_history_columns = 44
-   else
-      how_many_extra_history_columns = 44
+   if (prescription == ENERGY_PRESCRIPTION) then
+      how_many_extra_history_columns = 27
+   else if (prescription == FORCE_PRESCRIPTION) then
+      !we also want to store the current positions and velocities of the NS and companion, so we need 8 more columns for those
+      how_many_extra_history_columns = 37
    end if
+
 end function how_many_extra_history_columns
 
 ! ------------------------------------------------------------------------------
@@ -1012,110 +1028,109 @@ subroutine data_for_extra_history_columns(id, n, names, vals, ierr)
    ! it must not include the new column names you are adding here.
 
 !TODO
-   names(1) = 'a_curr'
-   names(2) = 'Injected_E_per_timestep'
-   names(3) = 'mdot_ns'
-   names(4) = 'azone'
-   names(5) = 'r1'
-   names(6) = 'r2'
-   names(7) = 'M_ns'
-   names(8) = 'M_acc'
-   names(9) = '-ebind_curr'
-   names(10) = 'delta_Eorb'
-   names(11) = 'Qmax'
-   names(12) = 'Qtb'
-   names(13) = 'Q'
-   names(14) = 'omega'
-   names(15) = 'Req'
-   names(16) = 'Rbar'
-   names(17) = 'beta'
-   names(18) = 'e'
-   names(19) = 'aa'
-   names(20) = 'bb'
-   names(21) = 'mom_inert'
-   names(22) = 'strain'
-   names(23) = 'mass_at_a'
-   names(24) = 'R_azone'
-   names(25) = 'decay_coeff'
-   names(26) = 'v_esc'
-   names(27) = 'u_k'
-   names(28) = 'csound_ns'
-   names(29) = 'lnT_ns'
-   names(30) = 'rho_ns'
-   names(31) = 'lnPgas_ns'
-   names(32) = 'gamma1_ns'
-   names(33) = 'scale_height_ns'
-   names(34) = 'R99'
-   names(35) = 'R95'
-   names(36) = 'R90'
-   names(37) = 'mdot_edd'
-   names(38) = 'v_ns'
-   names(39) = 'Ra'
-   names(40) = 'mdot_hl'
-   names(41) = 'mdot_MR15'
-   names(42) = 'fd_ns'
-   names(43) = 'fd_hl'
-   names(44) = 'fd_MR15'
+   names(1) = 'aorb'
+   names(2) = 'Einj_per_dt'
+   names(3) = 'M_ns'
+   names(4) = 'M_enc'
+   names(5) = 'M_acc'
+   names(6) = 'rho'
+   names(7) = 'Qmax'
+   names(8) = 'Qtb'
+   names(9) = 'Q'
+   names(10) = 'omega'
+   names(11) = 'mom_inert'
+   names(12) = 'strain'
+   names(13) = 'scale_height'
+   names(14) = 'csound'
+   names(15) = 'lnPgas'
+   names(16) = 'lnT'
+   names(17) = 'u_k'
+   if (prescription == FORCE_PRESCRIPTION) then
+      names(18) = 'xcore'
+      names(19) = 'ycore'
+      names(20) = 'xcomp'
+      names(21) = 'ycomp'
+      names(22) = 'vxcore'
+      names(23) = 'vycore'
+      names(24) = 'vxcomp'
+      names(25) = 'vycomp'
+      names(26) = 'vx_rel'
+      names(27) = 'vy_rel'
+      names(28) = 'v_rel'
+      names(29) = 'mdot_hl'
+      names(30) = 'fd_hl'
+      names(31) = 'edot_hl'
+      names(32) = 'Ra'
+      names(33) = 'mdot_mr15'
+      names(34) = 'fd_mr15'
+      names(35) = 'edot_mr15'
+      names(36) = 'fd'
+      names(37) = 'edot'
+   else if (prescription == ENERGY_PRESCRIPTION) then
+      names(18) = 'v_rel'
+      names(19) = 'mdot_hl'
+      names(20) = 'fd_hl'
+      names(21) = 'edot_hl'
+      names(22) = 'Ra'
+      names(23) = 'mdot_mr15'
+      names(24) = 'fd_mr15'
+      names(25) = 'edot_mr15'
+      names(26) = 'fd'
+      names(27) = 'edot'
 
-   vals(1) = s%xtra(a_curr)
-   vals(2) = efactor*SUM(s% extra_heat(1:s%nz)%val * s% dm(1:s%nz))*s%dt_next
-   vals(3) = mdot
-   vals(4) = azone
-   vals(5) = r1
-   vals(6) = r2
-   vals(7) = s%xtra(M_ns_curr)
-   vals(8) = s%xtra(M_acc_curr)
-   vals(9) = -ebind
-   vals(10) = eorb_change
-   vals(11) = s%xtra(Qmax_curr)
-   vals(12) = s%xtra(Qtb_curr)
-   vals(13) = s%xtra(Q_curr)
-   vals(14) = s%xtra(omega_curr)
-   vals(15) = Req
-   vals(16) = Rbar
-   vals(17) = beta
-   vals(18) = s%xtra(e_curr)
-   vals(19) = s%xtra(aa_curr)
-   vals(20) = s%xtra(bb_curr)
-   vals(21) = s%xtra(mom_inert_curr)
-   vals(22) = s%xtra(strain_curr)
-   vals(23) = s%m(azone)
-   vals(24) = s%R(azone)
-   vals(25) = decay_coeff
-   vals(26) = sqrt(2*standard_cgrav*s% m(azone)/s% R(azone))
-   vals(27) = s%u(azone)
-   vals(28) = s%csound(azone)
-   vals(29) = s%lnT(azone)
-   vals(30) = s%rho(azone)
-   vals(31) = s%lnPgas(azone)
-   vals(32) = s%gamma1(azone)
-   vals(33) = s%scale_height(azone) 
-   call find_zone(s%m(1:s%nz), 0.99*s%m(1), zone_temp)
-   vals(34) = s%R(zone_temp)
+   end if
 
-   call find_zone(s%m(1:s%nz), 0.95*s%m(1), zone_temp)
-   vals(35) = s%R(zone_temp)
-
-   call find_zone(s%m(1:s%nz), 0.90*s%m(1), zone_temp)
-   vals(36) = s%R(zone_temp)
-   vals(37) = mdot_edd(azone)
-
-   if (prescription == 1) then
-      vals(38) = v(azone)
-      vals(39) = Ra(azone)
-      vals(40) = mdot_hl(azone)
-      vals(41) = mdot_mr15(azone)
-      vals(42) = fd_arr(azone)
-      vals(43) = fd_hl(azone)
-      vals(44) = fd_mr15(azone)
-   else if (prescription == 2) then
-      vals(38) = v_rel
-      vals(39) = Ra_br
-      vals(40) = mdot_hl_br
-      vals(41) = mdot_mr15_br
-      vals(42) = fd_br
-      vals(43) = fd_hl_br
-      vals(44) = fd_mr15_br
+   vals(1) = s%xtra(ia)
+   vals(2) = efactor*SUM(s% extra_heat(1:s%nz)%val * s% dm(1:s%nz)) * s%dt_next
+   vals(3) = s%xtra(iM_ns)
+   call interpolate(s%xtra(ia), vals(4), s%R, s%m)
+   vals(5) = s%xtra(iM_acc)
+   call interpolate(s%xtra(ia), vals(6), s%R, s%rho)
+   vals(7) = s%xtra(iQmax)
+   vals(8) = s%xtra(iQtb)
+   vals(9) = s%xtra(iQ)
+   vals(10) = s%xtra(iomega)
+   vals(11) = s%xtra(imom_inert)
+   vals(12) = s%xtra(istrain)
+   call interpolate(s%xtra(ia), vals(13), s%R, s%scale_height)
+   call interpolate(s%xtra(ia), vals(14), s%R, s%csound)
+   call interpolate(s%xtra(ia), vals(15), s%R, s%lnPgas)
+   call interpolate(s%xtra(ia), vals(16), s%R, s%lnT)
+   call interpolate(s%xtra(ia), vals(17), s%R, s%u)
+   if (prescription == FORCE_PRESCRIPTION) then
+      vals(18) = s%xtra(ixcore)
+      vals(19) = s%xtra(iycore)
+      vals(20) = s%xtra(ixcomp)
+      vals(21) = s%xtra(iycomp)
+      vals(22) = s%xtra(ivxcore)    
+      vals(23) = s%xtra(ivycore)
+      vals(24) = s%xtra(ivxcomp)
+      vals(25) = s%xtra(ivycomp)
+      call get_relative_velocity_force_rhs(s, vals(1), s%xtra(ixcore), s%xtra(iycore), s%xtra(ixcomp), s%xtra(iycomp), &
+                                         s%xtra(ivxcore), s%xtra(ivycore), s%xtra(ivxcomp), s%xtra(ivycomp), &
+                                         vals(26), vals(27), vals(28))
+      call get_hl_accretion(vals(3), vals(6), vals(28), vals(29), vals(30), vals(31), vals(32))
+      call mr15(s, vals(1), vals(3), vals(6), vals(28), vals(33), vals(34), vals(35))
+      if (drag_prescription == MR15_DRAG) then
+         vals(36) = vals(34)
+         vals(37) = vals(35)
+      else if (drag_prescription == KIM07_DRAG) then
+         call kim2007(s, vals(1), vals(3), vals(6), vals(28), vals(36), vals(37))
+      else if (drag_prescription == KIM10_DRAG) then
+         call kim2010(s, vals(1), vals(3), vals(6), vals(28), vals(36), vals(37))
+      end if
+   else if (prescription == ENERGY_PRESCRIPTION) then
+      call get_relative_velocity_energy_rhs(s, vals(1), vals(3), vals(4), vals(18))
+      call get_hl_accretion(vals(3), vals(6), vals(18), vals(19), vals(20), vals(21), vals(22))
+      call mr15(s, vals(1), vals(3), vals(6), vals(18), vals(23), vals(24), vals(25))
+      if (drag_prescription == MR15_DRAG) then
+         vals(26) = vals(24)
+         vals(27) = vals(25)
+      else if (drag_prescription == KIM07_DRAG) then
+         call kim2007(s, vals(1), vals(3), vals(6), vals(18), vals(26), vals(27))
+      else if (drag_prescription == KIM10_DRAG) then
+         call kim2010(s, vals(1), vals(3), vals(6), vals(18), vals(26), vals(27))
+      end if
    end if
 
 end subroutine data_for_extra_history_columns
@@ -1129,12 +1144,8 @@ integer function how_many_extra_profile_columns(id)
    ierr = 0
    call star_ptr(id, s, ierr)
    if (ierr /= 0) return
-!TODO
-   if (prescription == 1) then
-      how_many_extra_profile_columns = 14
-   else if (prescription == 2) then
-      how_many_extra_profile_columns = 0
-   end if
+
+   how_many_extra_profile_columns = 0
 end function how_many_extra_profile_columns
 
 ! ------------------------------------------------------------------------------
@@ -1150,50 +1161,6 @@ subroutine data_for_extra_profile_columns(id, n, nz, names, vals, ierr)
    call star_ptr(id, s, ierr)
    if (ierr /= 0) return
    
-   ! note: do NOT add the extra names to profile_columns.list
-   ! the profile_columns.list is only for the built-in profile column options.
-   ! it must not include the new column names you are adding here.
-
-   ! here is an example for adding a profile column
-   !if (n /= 1) stop 'data_for_extra_profile_columns'
-   !names(1) = 'beta'
-   !do k = 1, nz
-   !   vals(k,1) = s% Pgas(k)/s% P(k)
-   !end do
-!TODO
-   if (prescription == 1) then
-      names(1) = 'mdot_hl'
-      names(2) = 'mdot_MR15'
-      names(3) = 'mdot'
-      names(4) = 'fd_hl'
-      names(5) = 'fd_MR15'
-      names(6) = 'fd'
-      names(7) = 'edot_hl'
-      names(8) = 'edot'
-      names(9) = 'eps_rho'
-      names(10) = 'v_ns'
-      names(11) = 'Ra'
-      names(12) = 'Eorb'
-      names(13) = 'dEorb'
-      names(14) = 'f'
-
-      do k = 1, s%nz
-         vals(k,1) = mdot_hl(k)
-         vals(k,2) = mdot_mr15(k)
-         vals(k,3) = mdot_arr(k)
-         vals(k,4) = fd_hl(k)
-         vals(k,5) = fd_mr15(k)
-         vals(k,6) = fd_arr(k)
-         vals(k,7) = edot_hl(k)
-         vals(k,8) = edot(k)
-         vals(k,9) = eps_rho(k)
-         vals(k,10) = v(k)
-         vals(k,11) = Ra(k)
-         vals(k,12) = Eorb(k)
-         vals(k,13) = dEorb(k)
-         vals(k,14) = f(k)
-      end do
-   end if
 end subroutine data_for_extra_profile_columns
 
 ! ------------------------------------------------------------------------------
@@ -1205,7 +1172,7 @@ integer function how_many_extra_history_header_items(id)
    ierr = 0
    call star_ptr(id, s, ierr)
    if (ierr /= 0) return
-   how_many_extra_history_header_items = 0
+   how_many_extra_history_header_items = 2
 end function how_many_extra_history_header_items
 
 ! ------------------------------------------------------------------------------
@@ -1225,6 +1192,12 @@ subroutine data_for_extra_history_header_items(id, n, names, vals, ierr)
    ! names(1) = 'mixing_length_alpha'
    ! vals(1) = s% mixing_length_alpha
 
+   names(1) = 'orbit_prescription'
+   vals(1) = prescription
+
+   names(2) = 'drag_prescription'
+   vals(2) = drag_prescription
+
 end subroutine data_for_extra_history_header_items
 
 ! ------------------------------------------------------------------------------
@@ -1236,7 +1209,11 @@ integer function how_many_extra_profile_header_items(id)
    ierr = 0
    call star_ptr(id, s, ierr)
    if (ierr /= 0) return
-   how_many_extra_profile_header_items = 0
+   if (prescription == FORCE_PRESCRIPTION) then
+      how_many_extra_profile_header_items = 39
+   else if (prescription == ENERGY_PRESCRIPTION) then
+      how_many_extra_profile_header_items = 29
+   end if
 end function how_many_extra_profile_header_items
 
 ! ------------------------------------------------------------------------------
@@ -1256,33 +1233,112 @@ subroutine data_for_extra_profile_header_items(id, n, names, vals, ierr)
    ! names(1) = 'mixing_length_alpha'
    ! vals(1) = s% mixing_length_alpha
 
-!TODO
-   names(1) = 'a_next'
-   names(2) = 'mdot_ns'
-   names(3) = 'azone'
-   names(4) = 'r1'
-   names(5) = 'r2'
-   names(6) = 'M_acc'
-   names(7) = 'Q'
-   names(8) = 'omega'
-   names(9) = 'v_ns'
-   names(10) = 'fd_ns'
+   names(1) = 'aorb'
+   names(2) = 'M_ns'
+   names(3) = 'orbit_prescription'
+   names(4) = 'drag_prescription'
+   names(5) = 'Einj_per_dt'
+   names(6) = 'M_enc'
+   names(7) = 'M_acc'
+   names(8) = 'rho'
+   names(9) = 'Qmax'
+   names(10) = 'Qtb'
+   names(11) = 'Q'
+   names(12) = 'omega'
+   names(13) = 'mom_inert'
+   names(14) = 'strain'
+   names(15) = 'scale_height'
+   names(16) = 'csound'
+   names(17) = 'lnPgas'
+   names(18) = 'lnT'
+   names(19) = 'u_k'
+   if (prescription == FORCE_PRESCRIPTION) then
+      names(20) = 'xcore'
+      names(21) = 'ycore'
+      names(22) = 'xcomp'
+      names(23) = 'ycomp'
+      names(24) = 'vxcore'
+      names(25) = 'vycore'
+      names(26) = 'vxcomp'
+      names(27) = 'vycomp'
+      names(28) = 'vx_rel'
+      names(29) = 'vy_rel'
+      names(30) = 'v_rel'
+      names(31) = 'mdot_hl'
+      names(32) = 'fd_hl'
+      names(33) = 'edot_hl'
+      names(34) = 'Ra'
+      names(35) = 'mdot_mr15'
+      names(36) = 'fd_mr15'
+      names(37) = 'edot_mr15'
+      names(38) = 'fd'
+      names(39) = 'edot'
+   else if (prescription == ENERGY_PRESCRIPTION) then
+      names(20) = 'v_rel'
+      names(21) = 'mdot_hl'
+      names(22) = 'fd_hl'
+      names(23) = 'edot_hl'
+      names(24) = 'Ra'
+      names(25) = 'mdot_mr15'
+      names(26) = 'fd_mr15'
+      names(27) = 'edot_mr15'
+      names(28) = 'fd'
+      names(29) = 'edot'
+   end if
 
-   vals(1) = s%xtra(a_curr)
-   vals(2) = mdot
-   vals(3) = azone
-   vals(4) = r1
-   vals(5) = r2
-   vals(6) = s%xtra(M_acc_curr)
-   vals(7) = s%xtra(Q_curr)
-   vals(8) = s%xtra(omega_curr)
-
-   if (prescription == 1) then 
-      vals(9) = v(azone)
-      vals(10) = fd_arr(azone)
-   else if (prescription == 2) then
-      vals(9) = v_rel
-      vals(10) = fd_br
+   vals(1) = s%xtra(ia)
+   vals(2) = s%xtra(iM_ns)
+   vals(3) = prescription
+   vals(4) = drag_prescription
+   vals(5) = efactor*SUM(s% extra_heat(1:s%nz)%val * s% dm(1:s%nz)) * s%dt_next
+   call interpolate(s%xtra(ia), vals(6), s%R, s%m)
+   vals(7) = s%xtra(iM_acc)
+   call interpolate(s%xtra(ia), vals(8), s%R, s%rho)
+   vals(9) = s%xtra(iQmax)
+   vals(10) = s%xtra(iQtb)
+   vals(11) = s%xtra(iQ)
+   vals(12) = s%xtra(iomega)
+   vals(13) = s%xtra(imom_inert)
+   vals(14) = s%xtra(istrain)
+   call interpolate(s%xtra(ia), vals(15), s%R, s%scale_height)
+   call interpolate(s%xtra(ia), vals(16), s%R, s%csound)
+   call interpolate(s%xtra(ia), vals(17), s%R, s%lnPgas)
+   call interpolate(s%xtra(ia), vals(18), s%R, s%lnT)
+   call interpolate(s%xtra(ia), vals(19), s%R, s%u)
+   if (prescription == FORCE_PRESCRIPTION) then
+      vals(20) = s%xtra(ixcore)
+      vals(21) = s%xtra(iycore)
+      vals(22) = s%xtra(ixcomp)
+      vals(23) = s%xtra(iycomp)
+      vals(24) = s%xtra(ivxcore)    
+      vals(25) = s%xtra(ivycore)
+      vals(26) = s%xtra(ivxcomp)
+      vals(27) = s%xtra(ivycomp)
+      call get_relative_velocity_force_rhs(s, vals(1), s%xtra(ixcore), s%xtra(iycore), s%xtra(ixcomp), s%xtra(iycomp), &
+                                         s%xtra(ivxcore), s%xtra(ivycore), s%xtra(ivxcomp), s%xtra(ivycomp), &
+                                         vals(28), vals(29), vals(30))
+      call get_hl_accretion(vals(3), vals(6), vals(28), vals(31), vals(32), vals(33), vals(34))
+      call mr15(s, vals(1), vals(3), vals(6), vals(28), vals(35), vals(36), vals(37))
+      if (drag_prescription == MR15_DRAG) then
+         vals(38) = vals(36)
+         vals(39) = vals(37)
+      else if (drag_prescription == KIM07_DRAG) then
+         call kim2007(s, vals(1), vals(3), vals(6), vals(28), vals(38), vals(39))
+      else if (drag_prescription == KIM10_DRAG) then
+         call kim2010(s, vals(1), vals(3), vals(6), vals(28), vals(38), vals(39))
+      end if
+   else if (prescription == ENERGY_PRESCRIPTION) then
+      call get_relative_velocity_energy_rhs(s, vals(1), vals(3), vals(4), vals(20))
+      call get_hl_accretion(vals(3), vals(6), vals(18), vals(21), vals(22), vals(23), vals(24))
+      call mr15(s, vals(1), vals(3), vals(6), vals(18), vals(25), vals(26), vals(27))
+      if (drag_prescription == MR15_DRAG) then
+         vals(28) = vals(26)
+         vals(29) = vals(27)
+      else if (drag_prescription == KIM07_DRAG) then
+         call kim2007(s, vals(1), vals(3), vals(6), vals(18), vals(28), vals(29))
+      else if (drag_prescription == KIM10_DRAG) then
+         call kim2010(s, vals(1), vals(3), vals(6), vals(18), vals(28), vals(29))
+      end if
    end if
 
 end subroutine data_for_extra_profile_header_items
