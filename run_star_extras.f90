@@ -816,6 +816,45 @@ end subroutine get_strain
 
 ! ==============================================================================
 
+! Temperature and pressure at the surface of the star, and their derivatives with
+! respect to luminosity, radius, mass, and opacity. These are used in the
+! surface boundary condition for the MESA model. 
+
+subroutine other_surface_PT(id, &
+                  skip_partials, &
+                  lnT_surf, dlnT_dL, dlnT_dlnR, dlnT_dlnM, dlnT_dlnkap, &
+                  lnP_surf, dlnP_dL, dlnP_dlnR, dlnP_dlnM, dlnP_dlnkap, ierr)
+
+   use const_def, only: dp
+   integer, intent(in) :: id
+   logical, intent(in) :: skip_partials
+   real(dp), intent(out) :: lnT_surf, dlnT_dL, dlnT_dlnR, dlnT_dlnM, dlnT_dlnkap, &
+            lnP_surf, dlnP_dL, dlnP_dlnR, dlnP_dlnM, dlnP_dlnkap
+   integer, intent(out) :: ierr
+   type (star_info), pointer :: s
+
+   real(dp) :: g
+   ierr = 0
+   call star_ptr(id, s, ierr)
+   if (ierr /= 0) return
+
+   lnT_surf = log(pow(s%L(1) / (4d0 * pi * boltz_sigma * pow2(s%R(1))), 0.25d0))
+   dlnT_dL = lnT_surf / s%L(1)
+   dlnT_dlnR = -0.5d0
+   dlnT_dlnM = 0d0
+   dlnT_dlnkap = 0d0
+
+   g = s%M(1) / pow2(s%R(1))
+   lnP_surf = log(g / s%opacity(1))
+   dlnP_dL = 0d0
+   dlnP_dlnR = -2d0
+   dlnP_dlnM = 1d0
+   dlnP_dlnkap = -1d0
+
+end subroutine other_surface_PT
+
+! ==============================================================================
+
 ! Utility routines
 
 ! Find location in a monotonically varying array corresponding to a given
@@ -912,6 +951,7 @@ subroutine extras_controls(id, ierr)
    ! otherwise we use a null_ version which does nothing (except warn).
 
    s% other_energy => evolve_companion_and_inject_energy
+   s% other_surface_pt => other_surface_pt
    s% extras_startup => extras_startup
    s% extras_start_step => extras_start_step
    s% extras_check_model => extras_check_model
