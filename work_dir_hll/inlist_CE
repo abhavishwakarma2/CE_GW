@@ -1,0 +1,95 @@
+
+
+&star_job
+
+      show_log_description_at_start = .true. 
+
+      load_saved_model = .true.
+      load_model_filename = '12_Msun_RSG_vb.mod'
+      
+      set_initial_cumulative_energy_error = .true.
+      new_cumulative_energy_error = 0d0
+
+      set_initial_model_number = .true.
+      initial_model_number = 0
+
+      set_initial_dt = .true.
+      years_for_initial_dt = 1d-3
+
+      set_initial_age = .true.
+      initial_age = 0.0d0
+
+      change_v_flag = .true.
+      new_v_flag = .true.
+
+      ! set rotation to be close to synchronous
+      ! change_initial_rotation_flag = .true.
+      ! new_rotation_flag = .true.
+      ! set_omega = .true.
+      ! new_omega set in extras_startup
+      ! new_omega = 1d-7
+      ! relax_initial_omega = .true.
+
+
+/ ! end of star_job namelist
+
+
+&eos
+/ ! end of eos namelist
+
+&kap
+/ ! end of kap namelist
+
+&controls
+
+      ! when to stop
+      max_age = 5d0
+
+      ! CE setup - extra controls
+      x_ctrl(1) = 1.33                    !initial mass of NS (Msun)
+      x_ctrl(2) = 0.1                     !opacity (cm^2 g^-1)
+      x_ctrl(3) = 1                       !accretion efficiency factor
+      x_ctrl(4) = 1                       !efactor to multiply to edot
+                                          !if you want to decrease injected energy by some factor
+      x_ctrl(5) = 5d-2                    !NS crust mass (Msun/yr)
+      x_ctrl(6) = 2.5d2                   !intital NS spin frequency (Hz)
+      x_ctrl(7) = 1d6                     !initial NS equitorial radius (cm)
+      x_ctrl(8) = 1.77d-1                 !initial NS ellipticity
+      x_ctrl(9) = 5d-1                    !polytropic index
+      x_ctrl(10) = 1.4d-1                 !beta secular
+      x_ctrl(11) = 2.8                    !distance to source (kpc)
+      x_ctrl(12) = 0.0                    !this times the initial orbital period = envelope rotation period
+      x_ctrl(13) = 2                      !integration prescription: 1 - Energy, 2 - Force
+      x_ctrl(14) = 3                      !drag prescription: 1 - MR15, 2 - KIM07_DRAG, 3 - KIM10_DRAG
+      x_ctrl(15) = 9.9d-1                 !this times the primary's radius is the 
+                                          !initial orbital separation
+      x_ctrl(16) = 4d39                   !multiplication factor for Qmax
+      x_ctrl(17) = 500                    !nsteps for orbit integration
+
+      ! energy controls
+      use_other_energy = .true.
+
+      ! gravitational constant
+      use_other_cgrav = .true.
+
+      ! turn of conversion of elements via burning
+      dxdt_nuc_factor = 0.0d0
+
+      ! timestep controls
+      ! max_years_for_timestep = 1d-4
+      force_timestep_years = 1d-3
+
+      ! output
+      max_num_profile_models = 150
+      terminal_interval = 10
+      write_header_frequency = 10
+      x_ctrl(18) = 10                     !extra terminal frequency
+      x_ctrl(19) = 10                     !extra header frequency
+
+      !!! extra headers are printed when mod(model_number, extra_header_frequency*extra_terminal_frequency) = 0
+
+
+/ ! end of controls namelist
+
+&pgstar
+/ ! end of pgstar namelist
